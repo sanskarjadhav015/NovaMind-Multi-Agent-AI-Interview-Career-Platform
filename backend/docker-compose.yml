@@ -1,0 +1,83 @@
+﻿services:
+  redis:
+    image: redis:alpine
+    container_name: novamind-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    container_name: gateway-service
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./gateway/.env
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  auth:
+    build:
+      context: .
+      dockerfile: services/auth/Dockerfile
+    container_name: auth-service
+    ports:
+      - "8001:8001"
+    env_file:
+      - ./services/auth/.env
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  resume:
+    build:
+      context: .
+      dockerfile: services/resume/Dockerfile
+    container_name: resume-service
+    ports:
+      - "8002:8002"
+    env_file:
+      - ./services/resume/.env
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  interview:
+    build:
+      context: .
+      dockerfile: services/interview/Dockerfile
+    container_name: interview-service
+    ports:
+      - "8003:8003"
+    env_file:
+      - ./services/interview/.env
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  roadmap:
+    build:
+      context: .
+      dockerfile: services/roadmap/Dockerfile
+    container_name: roadmap-service
+    ports:
+      - "8004:8004"
+    env_file:
+      - ./services/roadmap/.env
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  billing:
+    build:
+      context: .
+      dockerfile: services/billing/Dockerfile
+    container_name: billing-service
+    ports:
+      - "8005:8005"
+    env_file:
+      - ./services/billing/.env
+    restart: unless-stopped

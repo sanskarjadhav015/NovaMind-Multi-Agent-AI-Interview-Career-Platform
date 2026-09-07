@@ -1,0 +1,14 @@
+deployment
+   ⬇️
+Docker files
+    ⬇️ (Docker build)
+Docker Images
+    ⬇️ (docker push)
+AWS ECR 
+    ⬇️ (pull image )
+ecs CLuseter
+ - gateway
+ - auth
+ - chat 
+ -agent
+ - billing
