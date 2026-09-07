@@ -84,7 +84,7 @@ novamind-multiagent-ai-platform/
 
 ---
 
-## 🚀 Quick Start Guide
+
 
 ### Prerequisites
 - [Node.js](https://nodejs.org/) (v18 or higher)
@@ -92,47 +92,7 @@ novamind-multiagent-ai-platform/
 - [Redis](https://redis.io/) (v6+)
 - API Keys: Groq / Gemini / OpenRouter, Razorpay (test keys), Firebase
 
-### 1. Environment Setup
-Each microservice and the frontend maintain isolated environment configurations. Copy the provided `.env.example` templates to `.env`:
 
-```bash
-# Gateway
-cp backend/gateway/.env.example backend/gateway/.env
-
-# Services
-cp backend/services/auth/.env.example backend/services/auth/.env
-cp backend/services/billing/.env.example backend/services/billing/.env
-cp backend/services/interview/.env.example backend/services/interview/.env
-cp backend/services/resume/.env.example backend/services/resume/.env
-cp backend/services/roadmap/.env.example backend/services/roadmap/.env
-
-# Frontend
-cp frontend/.env.example frontend/.env
-```
-
-### 2. Install Dependencies
-```bash
-# Frontend
-cd frontend && npm install
-
-# Backend Services
-cd ../backend/gateway && npm install
-cd ../services/auth && npm install
-cd ../services/billing && npm install
-cd ../services/interview && npm install
-cd ../services/resume && npm install
-cd ../services/roadmap && npm install
-```
-
-### 3. Run Locally
-Start the backend services and the frontend client concurrently:
-
-```bash
-# In separate terminal tabs or using Docker Compose:
-npm run dev
-```
-
----
 
 ## 🛡️ Security Note
 
