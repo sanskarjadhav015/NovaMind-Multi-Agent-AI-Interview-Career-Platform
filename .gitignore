@@ -74,3 +74,10 @@ desktop.ini
 docker-compose.override.yml
 .eslintcache
 .cache/
+
+# 9. Internal Notes & Guides
+INTERVIEW_PREPARATION_QUESTIONS_AND_ANSWERS.txt
+PROJECT_ARCHITECTURE_AND_SYSTEM_DESIGN.md
+PROJECT_WORKFLOW_AND_FEATURES_GUIDE.md
+TECH_STACK_AND_DEPLOYMENT_GUIDE.md
+deploymentSetup.txt
