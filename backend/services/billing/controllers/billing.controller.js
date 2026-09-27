@@ -138,14 +138,23 @@ export const createOrder = async (req, res) => {
     try {
         const { planId } = req.body;
         const userId = req.headers["x-user-id"] || req.headers["x-user_id"];
-        const plan = PLANS[planId];
 
-        if (!plan) {
+        if (!userId) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized: Missing user identification"
+            });
+        }
+
+        const allowedPlanIds = Object.keys(PLANS);
+        if (!planId || !allowedPlanIds.includes(planId)) {
             return res.status(400).json({
                 success: false,
                 message: "Invalid plan selected"
             });
         }
+
+        const plan = PLANS[planId];
 
         // Amount in paise (1 INR = 100 paise)
         const order = await razorpay.orders.create({
@@ -244,6 +253,24 @@ export const verifyPayment = async (req, res) => {
         payment.razorpayPaymentId = paymentId;
         payment.razorpaySignature = signature;
         await payment.save();
+
+        // Atomically and securely credit coins on Auth Service via internal communication
+        try {
+            const authUrl = process.env.AUTH_SERVICE_URL || "http://auth:8001";
+            await fetch(`${authUrl}/internal/credit-coins`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "x-internal-secret": process.env.INTERNAL_SERVICE_SECRET || ""
+                },
+                body: JSON.stringify({
+                    userId: payment.userId,
+                    coins: payment.interviewCoins
+                })
+            });
+        } catch (creditErr) {
+            console.error("Internal coin credit error:", creditErr.message);
+        }
 
         return res.status(200).json({
             success: true,

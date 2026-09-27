@@ -7,9 +7,13 @@ import "dotenv/config";
 import express from "express";
 import { connectDB } from "./config/db.js";
 import interviewRouter from "./routes/interview.route.js";
+import { verifyInternalSecret } from "../../shared/middleware/verifyInternalSecret.js";
+import { requestLogger } from "../../shared/middleware/requestLogger.js";
 
 const app = express();
 
+app.use(requestLogger("Interview"));
+app.use(verifyInternalSecret);
 app.use(express.json());
 
 const PORT = process.env.PORT || 6003;

@@ -8,6 +8,7 @@
 
 import graph from "../graph/graph.js";
 import Interview from "../models/interview.models.js";
+import mongoose from "mongoose";
 
 // Dynamically load shared Redis client if available
 let redisClient = null;
@@ -75,6 +76,13 @@ const safeRedisDel = async (key) => {
 export const startInterview = async (req, res) => {
     try {
         const userId = req.headers["x-user-id"] || req.headers["x-user_id"];
+        if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized: A valid User ID is required"
+            });
+        }
+
         const {
             type,
             role,
@@ -82,19 +90,30 @@ export const startInterview = async (req, res) => {
             resume = {}
         } = req.body;
 
-        if (!type || !role) {
+        const validTypes = ["technical", "hr"];
+        if (!type || typeof type !== "string" || !validTypes.includes(type.toLowerCase())) {
             return res.status(400).json({
                 success: false,
-                message: "Interview type and role are required"
+                message: "Invalid interview type. Allowed types are: Technical, HR."
             });
         }
+
+        if (!role || typeof role !== "string" || role.trim().length < 2 || role.trim().length > 100) {
+            return res.status(400).json({
+                success: false,
+                message: "A valid role between 2 and 100 characters is required."
+            });
+        }
+
+        const normalizedRole = role.trim();
+        const normalizedType = type.trim();
 
         // Invoke LangGraph state machine with action: "start"
         const result = await graph.invoke({
             action: "start",
-            role,
-            type,
-            useResume,
+            role: normalizedRole,
+            type: normalizedType,
+            useResume: Boolean(useResume),
             resume
         });
 
@@ -109,9 +128,9 @@ export const startInterview = async (req, res) => {
         // Create new interview document in MongoDB
         const interview = await Interview.create({
             userId,
-            type,
-            role,
-            useResume,
+            type: normalizedType,
+            role: normalizedRole,
+            useResume: Boolean(useResume),
             questions,
             currentQuestion: 0,
             status: "in-progress"
@@ -149,13 +168,33 @@ export const startInterview = async (req, res) => {
 export const submitAnswer = async (req, res) => {
     try {
         const userId = req.headers["x-user-id"] || req.headers["x-user_id"];
+        if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized: A valid User ID is required"
+            });
+        }
+
         const { interviewId, answer } = req.body;
 
-        // Validation: both interviewId and answer must be present
-        if (!interviewId || !answer) {
+        if (!interviewId || !mongoose.Types.ObjectId.isValid(interviewId)) {
             return res.status(400).json({
                 success: false,
-                message: "Interview ID and answer are required"
+                message: "A valid interviewId is required"
+            });
+        }
+
+        if (!answer || typeof answer !== "string" || answer.trim().length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: "Answer cannot be empty"
+            });
+        }
+
+        if (answer.length > 10000) {
+            return res.status(400).json({
+                success: false,
+                message: "Answer exceeds maximum permitted character limit (10,000 characters)"
             });
         }
 
@@ -252,7 +291,20 @@ export const submitAnswer = async (req, res) => {
 export const getInterview = async (req, res) => {
     try {
         const userId = req.headers["x-user-id"] || req.headers["x-user_id"];
+        if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized: A valid User ID is required"
+            });
+        }
+
         const { id } = req.params;
+        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid interview ID"
+            });
+        }
 
         const interview = await Interview.findOne({ _id: id, userId });
         if (!interview) {
@@ -270,7 +322,7 @@ export const getInterview = async (req, res) => {
         console.error("getInterview Error:", error);
         return res.status(500).json({
             success: false,
-            message: error.message || "Failed to fetch interview details"
+            message: "Failed to fetch interview details"
         });
     }
 };
@@ -349,10 +401,10 @@ const getAverageData = (list) => {
 export const getAllInterviews = async (req, res) => {
     try {
         const userId = req.headers["x-user-id"] || req.headers["x-user_id"];
-        if (!userId) {
+        if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
             return res.status(401).json({
                 success: false,
-                message: "Unauthorized: Missing user identification"
+                message: "Unauthorized: A valid User ID is required"
             });
         }
 

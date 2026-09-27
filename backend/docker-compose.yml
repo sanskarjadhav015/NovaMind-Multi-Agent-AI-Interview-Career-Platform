@@ -1,9 +1,9 @@
-﻿services:
+services:
   redis:
     image: redis:alpine
     container_name: novamind-redis
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     restart: unless-stopped
 
   gateway:
@@ -15,6 +15,14 @@
       - "8000:8000"
     env_file:
       - ./gateway/.env
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - AUTH_SERVICE_URL=http://auth:8001
+      - RESUME_SERVICE_URL=http://resume:8002
+      - INTERVIEW_SERVICE_URL=http://interview:8003
+      - ROADMAP_SERVICE_URL=http://roadmap:8004
+      - BILLING_SERVICE_URL=http://billing:8005
+      - INTERNAL_SERVICE_SECRET=${INTERNAL_SERVICE_SECRET:-novamind_sec_int_7f9b2e8f1704e43b1859c836da8b97d10}
     depends_on:
       - redis
     restart: unless-stopped
@@ -24,10 +32,13 @@
       context: .
       dockerfile: services/auth/Dockerfile
     container_name: auth-service
-    ports:
-      - "8001:8001"
+    expose:
+      - "8001"
     env_file:
       - ./services/auth/.env
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - INTERNAL_SERVICE_SECRET=${INTERNAL_SERVICE_SECRET:-novamind_sec_int_7f9b2e8f1704e43b1859c836da8b97d10}
     depends_on:
       - redis
     restart: unless-stopped
@@ -37,10 +48,13 @@
       context: .
       dockerfile: services/resume/Dockerfile
     container_name: resume-service
-    ports:
-      - "8002:8002"
+    expose:
+      - "8002"
     env_file:
       - ./services/resume/.env
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - INTERNAL_SERVICE_SECRET=${INTERNAL_SERVICE_SECRET:-novamind_sec_int_7f9b2e8f1704e43b1859c836da8b97d10}
     depends_on:
       - redis
     restart: unless-stopped
@@ -50,10 +64,13 @@
       context: .
       dockerfile: services/interview/Dockerfile
     container_name: interview-service
-    ports:
-      - "8003:8003"
+    expose:
+      - "8003"
     env_file:
       - ./services/interview/.env
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - INTERNAL_SERVICE_SECRET=${INTERNAL_SERVICE_SECRET:-novamind_sec_int_7f9b2e8f1704e43b1859c836da8b97d10}
     depends_on:
       - redis
     restart: unless-stopped
@@ -63,10 +80,13 @@
       context: .
       dockerfile: services/roadmap/Dockerfile
     container_name: roadmap-service
-    ports:
-      - "8004:8004"
+    expose:
+      - "8004"
     env_file:
       - ./services/roadmap/.env
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - INTERNAL_SERVICE_SECRET=${INTERNAL_SERVICE_SECRET:-novamind_sec_int_7f9b2e8f1704e43b1859c836da8b97d10}
     depends_on:
       - redis
     restart: unless-stopped
@@ -76,8 +96,14 @@
       context: .
       dockerfile: services/billing/Dockerfile
     container_name: billing-service
-    ports:
-      - "8005:8005"
+    expose:
+      - "8005"
     env_file:
       - ./services/billing/.env
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - AUTH_SERVICE_URL=http://auth:8001
+      - INTERNAL_SERVICE_SECRET=${INTERNAL_SERVICE_SECRET:-novamind_sec_int_7f9b2e8f1704e43b1859c836da8b97d10}
+    depends_on:
+      - redis
     restart: unless-stopped

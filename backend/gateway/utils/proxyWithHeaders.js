@@ -17,45 +17,35 @@ export const proxyWithHeaders = (serviceUrl) => {
     return proxy(
         serviceUrl,
         {
-            /**
-             * Controls whether the proxy middleware parses the incoming request body.
-             * Multipart/form-data must NOT be parsed here so that the original stream and boundary
-             * remain intact for downstream Multer parsing (e.g. in the Resume service).
-             */
-            parseReqBody: (srcReq) => {
-                const contentType = srcReq.headers["content-type"] || "";
-                return !contentType.toLowerCase().includes("multipart/form-data");
-            },
+            parseReqBody: false,
 
-            /**
-             * Injects authenticated user identification into the proxied request headers.
-             */
             proxyReqOptDecorator: (proxyReqOpts, srcReq) => {
+                // Strip any client-supplied identity or internal trust headers
+                delete proxyReqOpts.headers["x-user-id"];
+                delete proxyReqOpts.headers["x-user_id"];
+                delete proxyReqOpts.headers["x-internal-secret"];
+
+                // Inject internal service communication secret
+                if (process.env.INTERNAL_SERVICE_SECRET) {
+                    proxyReqOpts.headers["x-internal-secret"] = process.env.INTERNAL_SERVICE_SECRET;
+                }
+
+                // Inject authenticated user ID verified by Gateway session
                 if (srcReq.user) {
-                    proxyReqOpts.headers["x-user-id"] = srcReq.user.userId || srcReq.user._id || srcReq.user.id;
+                    proxyReqOpts.headers["x-user-id"] = (srcReq.user.userId || srcReq.user._id || srcReq.user.id).toString();
                 }
-                const contentType = srcReq.headers["content-type"] || "";
-                if (contentType.toLowerCase().includes("multipart/form-data")) {
-                    proxyReqOpts.headers["content-type"] = srcReq.headers["content-type"];
-                    if (srcReq.headers["content-length"]) {
-                        proxyReqOpts.headers["content-length"] = srcReq.headers["content-length"];
-                    }
-                }
+
                 return proxyReqOpts;
             },
 
-            /**
-             * Decorates or serializes JSON request bodies forwarded to downstream services.
-             */
-            proxyReqBodyDecorator: (bodyContent, srcReq) => {
-                const contentType = srcReq.headers["content-type"] || "";
-                if (contentType.toLowerCase().includes("multipart/form-data")) {
-                    return bodyContent;
+            proxyErrorHandler: (err, res, next) => {
+                console.error(`Proxy Error to ${serviceUrl}:`, err.message);
+                if (!res.headersSent) {
+                    return res.status(502).json({
+                        success: false,
+                        message: `Service unavailable: ${err.message}`
+                    });
                 }
-                if (srcReq.body && typeof srcReq.body === "object" && Object.keys(srcReq.body).length > 0) {
-                    return JSON.stringify(srcReq.body);
-                }
-                return bodyContent;
             }
         }
     );

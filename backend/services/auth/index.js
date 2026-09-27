@@ -8,11 +8,15 @@ import dotenv from "dotenv";
 import cookieParser from "cookie-parser";
 import { connectDB } from "./configs/db.js";
 import authRouter from "./routes/auth.route.js";
+import { verifyInternalSecret } from "../../shared/middleware/verifyInternalSecret.js";
+import { requestLogger } from "../../shared/middleware/requestLogger.js";
 
 dotenv.config();
 
 const app = express();
 
+app.use(requestLogger("Auth"));
+app.use(verifyInternalSecret);
 app.use(express.json());
 app.use(cookieParser());
 

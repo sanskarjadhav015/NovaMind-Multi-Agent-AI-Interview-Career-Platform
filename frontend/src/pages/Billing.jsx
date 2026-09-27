@@ -222,7 +222,7 @@ function Billing({ user, setUser }) {
       }
 
       const { order, key_id } = orderRes
-      const razorpayKey = key_id || import.meta.env.VITE_RAZORPAY_KEY_ID || 'rzp_test_TXw80c7m09yle5'
+      const razorpayKey = key_id || import.meta.env.VITE_RAZORPAY_KEY_ID || ''
 
       // Step 2: Configure Razorpay Checkout Modal
       const options = {
@@ -235,8 +235,8 @@ function Billing({ user, setUser }) {
         order_id: order.id,
         handler: async (response) => {
           try {
-            setStatusMessage('Verifying payment and adding coins...')
-            // Step 3: Verify Payment Signature in Backend
+            setStatusMessage('Verifying payment and crediting coins...')
+            // Step 3: Verify Payment Signature in Backend (Backend securely credits coins internally upon verification)
             const verifyRes = await verifyPayment({
               razorpay_order_id: response.razorpay_order_id,
               razorpay_payment_id: response.razorpay_payment_id,
@@ -245,16 +245,7 @@ function Billing({ user, setUser }) {
             })
 
             if (verifyRes?.success) {
-              // Step 4: Add coins to session / user
-              try {
-                await api.post('/api/auth/add-coins', {
-                  coins: plan.interviewCoins
-                })
-              } catch (coinErr) {
-                console.warn('Direct add-coins fallback error:', coinErr)
-              }
-
-              // Step 5: Refresh user and history state
+              // Refresh user and history state (coins are credited server-side by billing service)
               await refreshUserData()
 
               setPaymentSuccessData({

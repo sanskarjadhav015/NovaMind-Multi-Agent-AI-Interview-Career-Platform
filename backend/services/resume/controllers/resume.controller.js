@@ -9,6 +9,8 @@ import { resumeAgent } from "../agents/resume.agent.js";
 import extractText from "../config/pdf.js";
 import Resume from "../models/resume.model.js";
 import fs from "fs";
+import mongoose from "mongoose";
+import { verifyPdfMagicBytes } from "../middleware/multer.js";
 
 let redisClient = null;
 try {
@@ -59,8 +61,9 @@ const safeRedisSet = async (key, value, ttl = 600) => {
  * @returns {Promise<import("express").Response>}
  */
 export const uploadResume = async (req, res) => {
+    const file = req.file;
+
     try {
-        const file = req.file;
         if (!file) {
             return res.status(400).json({
                 success: false,
@@ -68,16 +71,30 @@ export const uploadResume = async (req, res) => {
             });
         }
 
+        // Validate PDF magic bytes
+        if (!verifyPdfMagicBytes(file.path)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid file content: The uploaded file is not a valid PDF document."
+            });
+        }
+
         const userId = req.headers["x-user-id"] || req.headers["x-user_id"];
-        if (!userId) {
+        if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
             return res.status(401).json({
                 success: false,
-                message: "Unauthorized: User ID is required"
+                message: "Unauthorized: A valid User ID is required"
             });
         }
 
         // Extract raw text from PDF
         const resumeText = await extractText(file.path);
+        if (!resumeText || resumeText.trim().length < 20) {
+            return res.status(400).json({
+                success: false,
+                message: "The uploaded PDF appears to be empty or unreadable text."
+            });
+        }
 
         // Run ATS Analysis LLM agent
         const aiResponse = await resumeAgent(resumeText);
@@ -121,11 +138,6 @@ export const uploadResume = async (req, res) => {
         // Cache in Redis
         await safeRedisSet(`resume:${userId}`, JSON.stringify(resume));
 
-        // Clean up temporary uploaded file
-        if (file && fs.existsSync(file.path)) {
-            fs.unlinkSync(file.path);
-        }
-
         return res.status(200).json({
             success: true,
             message: "Resume analyzed successfully",
@@ -134,13 +146,19 @@ export const uploadResume = async (req, res) => {
 
     } catch (error) {
         console.error("uploadResume Error:", error);
-        if (req.file && fs.existsSync(req.file.path)) {
-            fs.unlinkSync(req.file.path);
-        }
         return res.status(500).json({
             success: false,
             message: error.message || "Failed to process resume"
         });
+    } finally {
+        // Guaranteed cleanup of uploaded temporary file to prevent disk exhaustion
+        if (file && fs.existsSync(file.path)) {
+            try {
+                fs.unlinkSync(file.path);
+            } catch (err) {
+                console.error("Failed to delete temp file:", err.message);
+            }
+        }
     }
 };
 
@@ -154,10 +172,10 @@ export const uploadResume = async (req, res) => {
 export const getResume = async (req, res) => {
     try {
         const userId = req.headers["x-user-id"] || req.headers["x-user_id"];
-        if (!userId) {
+        if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
             return res.status(401).json({
                 success: false,
-                message: "Unauthorized: User ID is required"
+                message: "Unauthorized: A valid User ID is required"
             });
         }
 

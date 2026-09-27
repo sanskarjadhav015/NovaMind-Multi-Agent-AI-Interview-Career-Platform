@@ -7,9 +7,13 @@ import "dotenv/config";
 import express from "express";
 import { connectDB } from "./config/db.js";
 import resumeRouter from "./routes/resume.route.js";
+import { verifyInternalSecret } from "../../shared/middleware/verifyInternalSecret.js";
+import { requestLogger } from "../../shared/middleware/requestLogger.js";
 
 const app = express();
 
+app.use(requestLogger("Resume"));
+app.use(verifyInternalSecret);
 app.use(express.json());
 
 const PORT = process.env.PORT || 6002;

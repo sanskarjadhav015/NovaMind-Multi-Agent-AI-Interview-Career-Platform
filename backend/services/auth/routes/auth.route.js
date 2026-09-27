@@ -6,10 +6,12 @@
 import express from "express";
 import {
     addCoins,
+    creditCoinsInternal,
     GoogleAuth,
     logOut,
     useCoins
 } from "../controllers/auth.controller.js";
+import { verifyInternalSecret } from "../../../shared/middleware/verifyInternalSecret.js";
 
 const authRouter = express.Router();
 
@@ -22,7 +24,10 @@ authRouter.get("/logout", logOut);
 // Deduct coins for interview or resume features
 authRouter.post("/use-coins", useCoins);
 
-// Credit purchased or bonus coins to the user
-authRouter.post("/add-coins", addCoins);
+// Internal-only endpoint to credit coins upon verified payment
+authRouter.post("/internal/credit-coins", verifyInternalSecret, creditCoinsInternal);
+
+// Legacy add-coins strictly guarded by internal secret
+authRouter.post("/add-coins", verifyInternalSecret, addCoins);
 
 export default authRouter;

@@ -16,6 +16,8 @@ try {
     console.log("Redis client not available in roadmap service:", e.message);
 }
 
+import mongoose from "mongoose";
+
 /**
  * Safely fetches a value from Redis cache.
  * @param {string} key - Redis key
@@ -80,32 +82,35 @@ export const generateRoadmap = async (req, res) => {
         } = req.body;
         const userId = req.headers["x-user-id"] || req.headers["x-user_id"];
 
-        if (!userId) {
+        if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
             return res.status(401).json({
                 success: false,
-                message: "Unauthorized: User ID is required"
+                message: "Unauthorized: A valid User ID is required"
             });
         }
 
-        if (!role || !targetPackage) {
+        if (!role || typeof role !== "string" || !targetPackage) {
             return res.status(400).json({
                 success: false,
-                message: "Role and target package are required."
+                message: "A valid role and target package are required."
             });
         }
 
-        if (useResume && !resume) {
+        const sanitizedRole = role.trim().slice(0, 100);
+        const sanitizedPackage = String(targetPackage).trim().slice(0, 50);
+
+        if (useResume && (!resume || typeof resume !== "object")) {
             return res.status(400).json({
                 success: false,
-                message: "Resume data is required when useResume is enabled."
+                message: "Valid resume data is required when useResume is enabled."
             });
         }
 
         // Invoke LangGraph roadmap generation pipeline
         const result = await graph.invoke({
-            role,
-            targetPackage,
-            useResume,
+            role: sanitizedRole,
+            targetPackage: sanitizedPackage,
+            useResume: Boolean(useResume),
             resume
         });
 
@@ -115,8 +120,8 @@ export const generateRoadmap = async (req, res) => {
             ...result.roadmap
         });
 
-        // Cache single roadmap and invalidate user list cache
-        await safeRedisSet(`roadmap:${roadmap._id}`, JSON.stringify(roadmap), 3600);
+        // Cache single roadmap user-scoped and invalidate user list cache
+        await safeRedisSet(`roadmap:${userId}:${roadmap._id}`, JSON.stringify(roadmap), 3600);
         await safeRedisDel(`userRoadmaps:${userId}`);
 
         return res.status(201).json({
@@ -129,7 +134,7 @@ export const generateRoadmap = async (req, res) => {
         console.error("Error generating roadmap:", error);
         return res.status(500).json({
             success: false,
-            message: error.message || "Failed to generate roadmap"
+            message: "Failed to generate roadmap"
         });
     }
 };
@@ -145,10 +150,10 @@ export const generateRoadmap = async (req, res) => {
 export const getAllRoadmap = async (req, res) => {
     try {
         const userId = req.headers["x-user-id"] || req.headers["x-user_id"];
-        if (!userId) {
+        if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
             return res.status(401).json({
                 success: false,
-                message: "Unauthorized: User ID is required"
+                message: "Unauthorized: A valid User ID is required"
             });
         }
 
@@ -174,7 +179,7 @@ export const getAllRoadmap = async (req, res) => {
         console.error("Error getting all roadmaps:", error);
         return res.status(500).json({
             success: false,
-            message: error.message || "Failed to fetch roadmaps"
+            message: "Failed to fetch roadmaps"
         });
     }
 };
@@ -191,15 +196,22 @@ export const getRoadmapbyId = async (req, res) => {
         const { id } = req.params;
         const userId = req.headers["x-user-id"] || req.headers["x-user_id"];
 
-        if (!userId) {
+        if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
             return res.status(401).json({
                 success: false,
-                message: "Unauthorized: User ID is required"
+                message: "Unauthorized: A valid User ID is required"
             });
         }
 
-        // Check single roadmap cache
-        const cache = await safeRedisGet(`roadmap:${id}`);
+        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid roadmap ID"
+            });
+        }
+
+        // Check user-scoped roadmap cache to prevent IDOR cache poisoning
+        const cache = await safeRedisGet(`roadmap:${userId}:${id}`);
         if (cache) {
             return res.json({
                 success: true,
@@ -220,7 +232,7 @@ export const getRoadmapbyId = async (req, res) => {
             });
         }
 
-        await safeRedisSet(`roadmap:${id}`, JSON.stringify(roadmap), 3600);
+        await safeRedisSet(`roadmap:${userId}:${id}`, JSON.stringify(roadmap), 3600);
 
         return res.json({
             success: true,
@@ -232,7 +244,7 @@ export const getRoadmapbyId = async (req, res) => {
         console.error("Error getting roadmap by id:", error);
         return res.status(500).json({
             success: false,
-            message: error.message || "Failed to fetch roadmap details"
+            message: "Failed to fetch roadmap details"
         });
     }
 };

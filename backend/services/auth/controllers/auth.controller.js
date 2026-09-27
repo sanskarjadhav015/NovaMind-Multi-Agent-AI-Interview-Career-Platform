@@ -62,11 +62,11 @@ export const GoogleAuth = async (req, res) => {
 
         const isProduction = process.env.NODE_ENV === "production";
 
-        // Issue session cookie
+        // Issue secure session cookie
         res.cookie("session", sessionId, {
             httpOnly: true,
             secure: isProduction,
-            sameSite: isProduction ? "none" : "lax",
+            sameSite: isProduction ? "strict" : "lax",
             maxAge: SESSION_TTL_MS
         });
 
@@ -104,7 +104,7 @@ export const logOut = async (req, res) => {
         res.clearCookie("session", {
             httpOnly: true,
             secure: isProduction,
-            sameSite: isProduction ? "none" : "lax",
+            sameSite: isProduction ? "strict" : "lax",
         });
 
         return res.status(200).json({
@@ -153,10 +153,10 @@ export const useCoins = async (req, res) => {
         const { coins, action } = req.body;
         const coinAmount = Number(coins);
 
-        if (!coinAmount || isNaN(coinAmount) || coinAmount <= 0) {
+        if (!coinAmount || isNaN(coinAmount) || coinAmount <= 0 || !Number.isInteger(coinAmount)) {
             return res.status(400).json({
                 success: false,
-                message: "A valid positive number of coins is required"
+                message: "A valid positive integer coin amount is required"
             });
         }
 
@@ -212,41 +212,26 @@ export const useCoins = async (req, res) => {
 };
 
 /**
- * Adds interview coins to a user's account balance and updates Redis session.
+ * Internally credits interview coins to a user's account balance following verified payment.
+ * Requires internal service secret validation.
  * 
- * @param {import("express").Request} req - Request containing { coins }
+ * @param {import("express").Request} req - Request containing { userId, coins }
  * @param {import("express").Response} res - Express response
  * @returns {Promise<import("express").Response>}
  */
-export const addCoins = async (req, res) => {
+export const creditCoinsInternal = async (req, res) => {
     try {
-        const sessionId = req.cookies?.session;
-        if (!sessionId) {
-            return res.status(401).json({
-                success: false,
-                message: "Unauthorized: Missing session token"
-            });
-        }
+        const { userId, coins } = req.body;
+        const coinAmount = Number(coins);
 
-        const session = await redis.get(`session:${sessionId}`);
-        if (!session) {
-            return res.status(401).json({
-                success: false,
-                message: "Session expired. Please log in again."
-            });
-        }
-
-        const sessionData = JSON.parse(session);
-        const coinAmount = Number(req.body?.coins);
-
-        if (!coinAmount || isNaN(coinAmount) || coinAmount <= 0) {
+        if (!userId || !coinAmount || isNaN(coinAmount) || coinAmount <= 0 || !Number.isInteger(coinAmount)) {
             return res.status(400).json({
                 success: false,
-                message: "A valid positive number of coins is required"
+                message: "Valid userId and positive integer coins amount are required"
             });
         }
 
-        const user = await User.findById(sessionData.userId);
+        const user = await User.findById(userId);
         if (!user) {
             return res.status(404).json({
                 success: false,
@@ -257,30 +242,42 @@ export const addCoins = async (req, res) => {
         user.interviewCoin += coinAmount;
         await user.save();
 
-        // Update Redis session cache
-        await redis.set(
-            `session:${sessionId}`,
-            JSON.stringify({
-                userId: user._id,
-                name: user.name,
-                email: user.email,
-                interviewCoin: user.interviewCoin
-            }),
-            "EX",
-            SESSION_TTL_SECONDS
-        );
+        // Also update any active session in Redis for this user if session cookie exists
+        const sessionId = req.cookies?.session;
+        if (sessionId) {
+            const session = await redis.get(`session:${sessionId}`);
+            if (session) {
+                const sessionData = JSON.parse(session);
+                if (sessionData.userId?.toString() === user._id.toString()) {
+                    await redis.set(
+                        `session:${sessionId}`,
+                        JSON.stringify({
+                            userId: user._id,
+                            name: user.name,
+                            email: user.email,
+                            interviewCoin: user.interviewCoin
+                        }),
+                        "EX",
+                        SESSION_TTL_SECONDS
+                    );
+                }
+            }
+        }
 
         return res.status(200).json({
             success: true,
-            message: "Coins added successfully",
+            message: "Coins credited successfully",
             interviewCoin: user.interviewCoin
         });
 
     } catch (error) {
-        console.error("addCoins Error:", error);
+        console.error("creditCoinsInternal Error:", error);
         return res.status(500).json({
             success: false,
-            message: error.message || "Failed to add interview coins"
+            message: error.message || "Failed to credit coins"
         });
     }
 };
+
+// Deprecated: Forward legacy addCoins calls to internal handler if internal secret present
+export const addCoins = creditCoinsInternal;
