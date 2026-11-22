@@ -75,5 +75,8 @@ const roadmapSchema = new mongoose.Schema(
     { timestamps: true }
 );
 
+// Compound index for sorted user roadmap retrieval
+roadmapSchema.index({ userId: 1, createdAt: -1 });
+
 const Roadmap = mongoose.model("Roadmap", roadmapSchema);
 export default Roadmap;

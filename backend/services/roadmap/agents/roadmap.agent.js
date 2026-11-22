@@ -16,6 +16,22 @@ import roadmapPrompt from "../config/roadmap.prompt.js";
  */
 const roadmapAgent = async (state) => {
     try {
+        let resumeContext = state.resumeContext || "";
+        if (state.useResume && state.userId && !resumeContext) {
+            try {
+                const { retrieveResumeContext } = await import("../../../shared/rag/retriever.js");
+                const ragResult = await retrieveResumeContext({
+                    userId: state.userId,
+                    query: `skills projects experience background for learning roadmap ${state.role}`
+                });
+                if (ragResult && ragResult.contextText) {
+                    resumeContext = ragResult.contextText;
+                }
+            } catch (ragErr) {
+                console.warn("[roadmapAgent] RAG retrieval error:", ragErr.message);
+            }
+        }
+
         const resume = state.useResume && state.resume
             ? {
                 skills: state.resume.skills,
@@ -39,6 +55,7 @@ ${state.targetPackage}
 
 Resume:
 ${JSON.stringify(resume, null, 2)}
+${resumeContext ? `\nVerified Candidate Resume Evidence (RAG):\n${resumeContext}\n` : ""}
 `)
         ]);
 
@@ -66,6 +83,7 @@ ${JSON.stringify(resume, null, 2)}
 
         return {
             ...state,
+            resumeContext,
             roadmap
         };
 

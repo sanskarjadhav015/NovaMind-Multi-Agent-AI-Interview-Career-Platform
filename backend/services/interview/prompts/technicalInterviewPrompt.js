@@ -2,6 +2,7 @@ const technicalInterviewPrompt = ({
     role,
     useResume,
     resume,
+    resumeContext
 }) => `
 You are a Senior Technical Interviewer.
 
@@ -41,6 +42,13 @@ ${resume?.missingSkills?.join(", ")}
 
 Recommendations:
 ${resume?.recommendations?.join(", ")}
+
+${resumeContext ? `
+=========================
+VERIFIED CANDIDATE RESUME EVIDENCE (RAG)
+=========================
+${resumeContext}
+` : ""}
 `
         : ""
     }

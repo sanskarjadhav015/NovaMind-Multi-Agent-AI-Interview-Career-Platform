@@ -17,29 +17,59 @@ const billingSchema = new mongoose.Schema(
             type: Number,
             required: true
         },
+        currency: {
+            type: String,
+            default: "INR"
+        },
         interviewCoins: {
             type: Number,
             required: true
         },
+        planId: {
+            type: String
+        },
         razorpayOrderId: {
             type: String,
+            required: true,
+            unique: true,
             index: true
         },
         razorpayPaymentId: {
-            type: String
+            type: String,
+            index: true
         },
         razorpaySignature: {
             type: String
         },
         status: {
             type: String,
-            enum: ["created", "paid", "failed"],
+            enum: ["created", "processing", "credit_pending", "paid", "failed"],
             default: "created",
+            index: true
+        },
+        creditDelivered: {
+            type: Boolean,
+            default: false
+        },
+        creditAttempts: {
+            type: Number,
+            default: 0
+        },
+        lastCreditError: {
+            type: String
+        },
+        idempotencyKey: {
+            type: String,
+            sparse: true,
             index: true
         }
     },
     { timestamps: true }
 );
+
+// Compound index for user billing history and status audits
+billingSchema.index({ userId: 1, createdAt: -1 });
+billingSchema.index({ status: 1, creditAttempts: 1 });
 
 const Billing = mongoose.model("Billing", billingSchema);
 export default Billing;

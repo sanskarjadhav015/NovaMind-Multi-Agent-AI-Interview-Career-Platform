@@ -73,10 +73,23 @@ const resumeSchema = new mongoose.Schema(
         recommendations: {
             type: [String],
             default: []
+        },
+        indexingStatus: {
+            type: String,
+            enum: ["pending", "indexed", "failed"],
+            default: "pending",
+            index: true
+        },
+        documentVersion: {
+            type: Number,
+            default: 1
         }
     },
     { timestamps: true }
 );
+
+// Compound index for user resume indexing status queries
+resumeSchema.index({ userId: 1, indexingStatus: 1 });
 
 const Resume = mongoose.model("Resume", resumeSchema);
 export default Resume;

@@ -6,16 +6,27 @@
 import express from "express";
 import dotenv from "dotenv";
 import cookieParser from "cookie-parser";
+import mongoose from "mongoose";
 import { connectDB } from "./configs/db.js";
 import authRouter from "./routes/auth.route.js";
 import { verifyInternalSecret } from "../../shared/middleware/verifyInternalSecret.js";
 import { requestLogger } from "../../shared/middleware/requestLogger.js";
+import { createHealthRouter } from "../../shared/middleware/healthCheck.js";
+import { isRedisHealthy } from "../../shared/redis/redis.js";
 
 dotenv.config();
 
 const app = express();
 
 app.use(requestLogger("Auth"));
+
+// Unauthenticated health probes for orchestrator (ECS/Docker/K8s)
+app.use("/health", createHealthRouter({
+    serviceName: "Auth",
+    mongoose,
+    redisCheck: isRedisHealthy
+}));
+
 app.use(verifyInternalSecret);
 app.use(express.json());
 app.use(cookieParser());

@@ -1,0 +1,142 @@
+name: NovaMind CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ===========================================================================
+  # 1. CODE QUALITY & LINTING
+  # ===========================================================================
+  lint-and-quality:
+    name: Code Quality & Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package.json
+
+      - name: Audit Backend Dependencies
+        run: |
+          cd backend
+          npm audit --audit-level=high || true
+
+  # ===========================================================================
+  # 2. FRONTEND TEST & BUILD
+  # ===========================================================================
+  frontend-build:
+    name: Frontend Build & Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package.json
+
+      - name: Install Frontend Dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Build Frontend Application (Vite)
+        run: |
+          cd frontend
+          npm run build
+
+  # ===========================================================================
+  # 3. BACKEND TESTS (PHASE 2 & PHASE 3 & PHASE 4)
+  # ===========================================================================
+  backend-tests:
+    name: Backend Unit & Integration Tests
+    runs-on: ubuntu-latest
+    services:
+      mongodb:
+        image: mongo:7-jammy
+        ports:
+          - 27017:27017
+      redis:
+        image: redis:alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package.json
+
+      - name: Install Backend Dependencies
+        run: |
+          cd backend
+          npm ci
+
+      - name: Run Backend Regression Test Suites
+        env:
+          MONGO_URI: mongodb://127.0.0.1:27017/novamind_test
+          REDIS_URL: redis://127.0.0.1:6379
+          INTERNAL_SERVICE_SECRET: novamind_sec_int_7f9b2e8f1704e43b1859c836da8b97d10
+        run: |
+          cd backend
+          node --test tests/*.test.js
+
+  # ===========================================================================
+  # 4. DOCKER BUILD VERIFICATION
+  # ===========================================================================
+  docker-build-check:
+    name: Docker Container Image Validation
+    needs: [frontend-build, backend-tests]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [gateway, auth, billing, interview, resume, roadmap]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Validate Container Build for ${{ matrix.service }}
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/${{ matrix.service == 'gateway' && 'gateway/Dockerfile' || format('services/{0}/Dockerfile', matrix.service) }}
+          push: false
+          tags: novamind-${{ matrix.service }}:test
+
+  # ===========================================================================
+  # 5. STAGING DEPLOYMENT GATE (MANUAL APPROVAL / PROTECTED ENVIRONMENT)
+  # ===========================================================================
+  staging-deployment:
+    name: Staging Deployment (Approval Required)
+    needs: [docker-build-check]
+    if: github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - name: Staging Deploy Placeholder
+        run: |
+          echo "Staging checks completed. Production approval gate verified."

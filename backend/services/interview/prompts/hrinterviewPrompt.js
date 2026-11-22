@@ -2,6 +2,7 @@ const hrInterviewPrompt = ({
     role,
     useResume,
     resume,
+    resumeContext
 }) => `
 
 
@@ -41,6 +42,13 @@ ${resume?.missingSkills?.join(", ")}
 
 Recommendations:
 ${resume?.recommendations?.join(", ")}
+
+${resumeContext ? `
+=========================
+VERIFIED CANDIDATE RESUME EVIDENCE (RAG)
+=========================
+${resumeContext}
+` : ""}
 `
         : ""
     }

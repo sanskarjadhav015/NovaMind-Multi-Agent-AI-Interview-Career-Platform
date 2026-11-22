@@ -18,42 +18,50 @@ import { getCurrentUser } from "./controllers/user.controller.js";
 import { isAuth } from "./middleware/isAuth.js";
 import { proxyWithHeaders } from "./utils/proxyWithHeaders.js";
 import { requestLogger } from "../shared/middleware/requestLogger.js";
+import { createHealthRouter } from "../shared/middleware/healthCheck.js";
 
 // Load environment configurations
 dotenv.config();
 
 const app = express();
 
-// Terminal request logger
+// Terminal and structured production request logger
 app.use(requestLogger("Gateway"));
 
 // Secure HTTP Headers via Helmet
 app.use(helmet({
     contentSecurityPolicy: false, // Managed by frontend host/CDN
-    crossOriginEmbedderPolicy: false
+    crossOriginEmbedderPolicy: false,
+    crossOriginOpenerPolicy: false,
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    frameguard: { action: "deny" },
+    noSniff: true,
+    xssFilter: true,
+    hsts: { maxAge: 31536000, includeSubDomains: true }
 }));
 
 // Allowed origins for cross-origin resource sharing
 const configuredOrigin = process.env.FRONTEND_URL ? process.env.FRONTEND_URL.replace(/\/$/, "") : "";
-const allowedOrigins = [
-    configuredOrigin,
-    "http://localhost:5173",
-    "http://127.0.0.1:5173"
-].filter(Boolean);
+const isAllowedOrigin = (origin) => {
+    if (!origin) return true;
+    const normalized = origin.replace(/\/$/, "");
+    if (configuredOrigin && normalized === configuredOrigin) return true;
+    // Support all local development ports (e.g. 5173, 5174, 3000)
+    if (/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(normalized)) return true;
+    return false;
+};
 
 // CORS configuration allowing credentials (cookies) from trusted origins
 app.use(cors({
     origin: (origin, callback) => {
-        if (!origin) return callback(null, true);
-        const normalized = origin.replace(/\/$/, "");
-        if (allowedOrigins.includes(normalized)) {
+        if (isAllowedOrigin(origin)) {
             return callback(null, true);
         }
         return callback(null, false);
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "Cookie"]
+    allowedHeaders: ["Content-Type", "Authorization", "Cookie", "x-request-id", "x-correlation-id"]
 }));
 
 // Request logging in development format
@@ -105,13 +113,22 @@ app.get("/", (req, res) => {
     });
 });
 
-app.get("/health", (req, res) => {
-    res.status(200).json({ status: "healthy" });
-});
+app.use("/health", createHealthRouter({ serviceName: "Gateway" }));
 
 // ==========================================
 // Microservice Reverse Proxy Routes
 // ==========================================
+
+// Security barrier: Block external attempts to access internal microservice endpoints via Gateway
+app.use((req, res, next) => {
+    if (req.path.includes("/internal/") || req.path.endsWith("/internal")) {
+        return res.status(403).json({
+            success: false,
+            message: "Forbidden: Internal endpoints cannot be accessed through the API Gateway"
+        });
+    }
+    next();
+});
 
 // Public Auth Service proxy with auth rate limiting
 app.use("/api/auth", authLimiter, proxyWithHeaders(process.env.AUTH_SERVICE_URL));

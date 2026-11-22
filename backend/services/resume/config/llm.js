@@ -28,10 +28,10 @@ const openRouterLlm = new ChatOpenAI({
     maxTokens: 4000,
 });
 
-// 3. Fallback 2: Google Gemini (Verified Working Model: gemini-3.6-flash)
+// 3. Fallback 2: Google Gemini (Verified Working Model: gemini-3.8-flash)
 const geminiLlm = new ChatGoogleGenerativeAI({
     apiKey: process.env.GEMINI_API_KEY,
-    model: "gemini-3.6-flash",
+    model: "gemini-3.8-flash",
     temperature: 0.1,
     maxRetries: 1,
     maxTokens: 4000,

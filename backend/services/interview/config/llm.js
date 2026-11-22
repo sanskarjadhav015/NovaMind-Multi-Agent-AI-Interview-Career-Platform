@@ -4,7 +4,7 @@
  * Pipeline:
  * 1. Primary: Groq (high-speed inference with GPT-OSS-120b)
  * 2. Fallback 1: OpenRouter (Nvidia Nemotron 30b reasoning)
- * 3. Fallback 2: Google Gemini (Gemini 3.6 Flash)
+ * 3. Fallback 2: Google Gemini (Gemini 3.8 Flash)
  */
 
 import "dotenv/config";
@@ -40,7 +40,7 @@ const openRouterLlm = new ChatOpenAI({
 // Tier 3 Fallback: Google Gemini API
 const geminiLlm = new ChatGoogleGenerativeAI({
     apiKey: process.env.GEMINI_API_KEY,
-    model: "gemini-3.6-flash",
+    model: "gemini-3.8-flash",
     temperature: 0.2,
     maxRetries: 1,
     maxTokens: 4000

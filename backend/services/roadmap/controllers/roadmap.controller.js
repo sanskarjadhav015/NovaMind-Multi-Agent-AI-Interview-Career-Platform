@@ -108,6 +108,7 @@ export const generateRoadmap = async (req, res) => {
 
         // Invoke LangGraph roadmap generation pipeline
         const result = await graph.invoke({
+            userId,
             role: sanitizedRole,
             targetPackage: sanitizedPackage,
             useResume: Boolean(useResume),

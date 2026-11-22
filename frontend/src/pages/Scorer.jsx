@@ -32,7 +32,6 @@ import { useDispatch, useSelector } from 'react-redux'
 import { setResume } from '../redux/resumeSlice.js'
 import { getResume } from '../api/resume.api.js'
 import { PolarAngleAxis, RadialBar, RadialBarChart, ResponsiveContainer } from "recharts"
-import { useCoins } from '../api/user.api.js'
 
 import { LuCoins } from "react-icons/lu"
 
@@ -243,27 +242,20 @@ function Scorer({ user, setUser }) {
     }
     try {
       setLoading(true)
-      const coinResponse = await useCoins({ coins: 10, action: "resume-scorer" })
-
-      if (!coinResponse?.success) {
-        setErrorMessage(coinResponse?.message || "Not enough interview coins to analyze resume (10 coins required)")
-        setLoading(false)
-        return
-      }
-
-      if (setUser) {
-        setUser((prev) => ({
-          ...prev,
-          interviewCoin: coinResponse.interviewCoin,
-        }))
-      }
       setErrorMessage("")
       const formData = new FormData()
       formData.append("resume", fileToUpload)
 
+      // Server validates & atomically deducts 10 coins
       const response = await api.post("/api/resume/upload", formData)
 
       if (response?.data?.data) {
+        if (setUser && response.data.interviewCoin !== undefined) {
+          setUser((prev) => ({
+            ...prev,
+            interviewCoin: response.data.interviewCoin,
+          }))
+        }
         dispatch(setResume(response.data.data))
         setIsReuploadModalOpen(false)
         setReuploadFile(null)

@@ -20,7 +20,6 @@ import {
 } from 'react-icons/fi'
 import { LuCoins, LuSparkles } from "react-icons/lu"
 import { startInterview } from '../../api/interview.api'
-import { useCoins } from '../../api/user.api'
 import { setResume } from '../../redux/resumeSlice'
 import api from '../../utils/axios'
 
@@ -91,22 +90,7 @@ function Step1setup({ user, setUser }) {
       setStarting(true);
       setErrorMessage('');
 
-      // Deduct coins first
-      const coinRes = await useCoins({ coins: 50, action: 'interview-start' });
-      if (!coinRes?.success) {
-        setErrorMessage(coinRes?.message || 'Coin transaction failed.');
-        setStarting(false);
-        return;
-      }
-
-      if (setUser) {
-        setUser((prev) => ({
-          ...prev,
-          interviewCoin: coinRes.interviewCoin,
-        }));
-      }
-
-      // Start interview backend session
+      // Start interview backend session (server validates & atomically deducts coins)
       const interviewRes = await startInterview({
         role: role.trim(),
         type,
@@ -115,6 +99,12 @@ function Step1setup({ user, setUser }) {
       });
 
       if (interviewRes?.success && interviewRes?.interviewId) {
+        if (setUser && interviewRes.interviewCoin !== undefined) {
+          setUser((prev) => ({
+            ...prev,
+            interviewCoin: interviewRes.interviewCoin,
+          }));
+        }
         navigate(`/interview/${interviewRes.interviewId}`);
       } else {
         setErrorMessage(interviewRes?.message || 'Failed to initialize AI interview. Please try again.');

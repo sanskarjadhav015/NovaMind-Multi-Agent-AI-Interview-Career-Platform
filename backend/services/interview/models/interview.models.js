@@ -149,5 +149,9 @@ const interviewSchema = new mongoose.Schema(
     { timestamps: true }
 );
 
+// Compound indexes for performant candidate interview querying
+interviewSchema.index({ userId: 1, createdAt: -1 });
+interviewSchema.index({ userId: 1, status: 1 });
+
 const Interview = mongoose.model("Interview", interviewSchema);
 export default Interview;

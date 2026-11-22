@@ -1,5 +1,27 @@
-﻿node_modules
+node_modules
 **/node_modules
 npm-debug.log
 .git
 .gitignore
+
+# Environment & Secret files (CRITICAL: prevent credential leakage into Docker images)
+.env
+*.env
+.env.*
+serviceAccountKey.json
+*serviceAccountKey*.json
+
+# Test files & artifacts
+tests/
+**/tests/
+*.test.js
+coverage/
+.nyc_output/
+
+# Documentation & Assets
+docs/
+*.md
+images/
+image/
+uploads/
+**/uploads/

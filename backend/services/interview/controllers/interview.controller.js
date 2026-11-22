@@ -9,6 +9,7 @@
 import graph from "../graph/graph.js";
 import Interview from "../models/interview.models.js";
 import mongoose from "mongoose";
+import crypto from "crypto";
 
 // Dynamically load shared Redis client if available
 let redisClient = null;
@@ -108,9 +109,49 @@ export const startInterview = async (req, res) => {
         const normalizedRole = role.trim();
         const normalizedType = type.trim();
 
+        let deductedCoins = false;
+        const idempotencyKey = req.body.idempotencyKey || `interview_start_${userId}_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
+
+        // Server-side atomic & idempotent coin deduction (50 coins)
+        const authUrl = process.env.AUTH_SERVICE_URL || "http://localhost:8001";
+        let deductData = null;
+        try {
+            const deductRes = await fetch(`${authUrl}/internal/deduct-coins`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "x-internal-secret": process.env.INTERNAL_SERVICE_SECRET || ""
+                },
+                body: JSON.stringify({
+                    userId,
+                    coins: 50,
+                    action: "interview_start",
+                    idempotencyKey
+                }),
+                signal: AbortSignal.timeout(8000)
+            });
+
+            deductData = await deductRes.json();
+            if (!deductRes.ok || !deductData.success) {
+                return res.status(deductRes.status === 403 ? 403 : 400).json({
+                    success: false,
+                    message: deductData.message || "Insufficient interview coins (50 required)",
+                    interviewCoin: deductData.interviewCoin
+                });
+            }
+            deductedCoins = true;
+        } catch (authErr) {
+            console.error("Coin deduction communication error:", authErr.message);
+            return res.status(502).json({
+                success: false,
+                message: "Unable to verify coin balance with Auth service. Please try again shortly."
+            });
+        }
+
         // Invoke LangGraph state machine with action: "start"
         const result = await graph.invoke({
             action: "start",
+            userId,
             role: normalizedRole,
             type: normalizedType,
             useResume: Boolean(useResume),
@@ -144,11 +185,35 @@ export const startInterview = async (req, res) => {
             interviewId: interview._id,
             currentQuestion: 0,
             totalQuestions: interview.questions.length,
-            question: interview.questions[0]
+            question: interview.questions[0],
+            interviewCoin: deductData?.interviewCoin
         });
 
     } catch (error) {
         console.error("startInterview Error:", error);
+
+        // Automatic idempotent refund if coins were deducted before error
+        if (deductedCoins) {
+            try {
+                const authUrl = process.env.AUTH_SERVICE_URL || "http://localhost:8001";
+                await fetch(`${authUrl}/internal/refund-coins`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "x-internal-secret": process.env.INTERNAL_SERVICE_SECRET || ""
+                    },
+                    body: JSON.stringify({
+                        userId,
+                        coins: 50,
+                        reason: "interview_start_failed",
+                        idempotencyKey: `refund_${idempotencyKey}`
+                    }),
+                    signal: AbortSignal.timeout(8000)
+                });
+            } catch (refundErr) {
+                console.error("Auto-refund error:", refundErr.message);
+            }
+        }
         return res.status(500).json({
             success: false,
             message: error.message || "Failed to start interview"
@@ -166,6 +231,27 @@ export const startInterview = async (req, res) => {
  * @returns {Promise<import("express").Response>}
  */
 export const submitAnswer = async (req, res) => {
+    let lockAcquired = false;
+    let lockKey = null;
+    let lockToken = null;
+
+    const releaseLock = async () => {
+        if (lockAcquired && lockKey && lockToken && redisClient && typeof redisClient.eval === "function") {
+            try {
+                const luaScript = `
+                    if redis.call("get", KEYS[1]) == ARGV[1] then
+                        return redis.call("del", KEYS[1])
+                    else
+                        return 0
+                    end
+                `;
+                await redisClient.eval(luaScript, 1, lockKey, lockToken);
+            } catch (relErr) {
+                console.warn("Distributed lock release warning:", relErr.message);
+            }
+        }
+    };
+
     try {
         const userId = req.headers["x-user-id"] || req.headers["x-user_id"];
         if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
@@ -175,7 +261,7 @@ export const submitAnswer = async (req, res) => {
             });
         }
 
-        const { interviewId, answer } = req.body;
+        const { interviewId, answer, questionIndex } = req.body;
 
         if (!interviewId || !mongoose.Types.ObjectId.isValid(interviewId)) {
             return res.status(400).json({
@@ -198,6 +284,36 @@ export const submitAnswer = async (req, res) => {
             });
         }
 
+        // 1. Acquire Distributed Redis Lock for answering to prevent concurrent processing
+        lockKey = `lock:interview:${interviewId}:answering`;
+        lockToken = crypto.randomUUID();
+
+        if (redisClient && typeof redisClient.set === "function") {
+            try {
+                const setRes = await redisClient.set(lockKey, lockToken, "NX", "EX", 60);
+                if (!setRes) {
+                    return res.status(409).json({
+                        success: false,
+                        message: "Answer evaluation is already in progress for this question. Please wait.",
+                        inProgress: true
+                    });
+                }
+                lockAcquired = true;
+            } catch (lockErr) {
+                console.error("Distributed lock error:", lockErr.message);
+                return res.status(503).json({
+                    success: false,
+                    message: "Concurrency lock service temporarily unavailable. Please retry."
+                });
+            }
+        } else {
+            return res.status(503).json({
+                success: false,
+                message: "Concurrency lock service is currently unavailable. Please retry."
+            });
+        }
+
+        // 2. Fetch and validate interview document
         const interview = await Interview.findOne({ _id: interviewId, userId });
         if (!interview) {
             return res.status(404).json({
@@ -213,6 +329,14 @@ export const submitAnswer = async (req, res) => {
             });
         }
 
+        // 3. Question sequence validation
+        if (questionIndex !== undefined && Number(questionIndex) !== interview.currentQuestion) {
+            return res.status(400).json({
+                success: false,
+                message: `Question index mismatch: Expected question ${interview.currentQuestion}, received ${questionIndex}`
+            });
+        }
+
         const index = interview.currentQuestion;
         const currentQuestion = interview.questions[index];
 
@@ -223,11 +347,11 @@ export const submitAnswer = async (req, res) => {
             });
         }
 
-        // Attach candidate response
+        // 4. Attach candidate response
         currentQuestion.userAnswer = answer;
         const isLastQuestion = interview.currentQuestion + 1 >= interview.questions.length;
 
-        // Invoke LangGraph state machine with action: "feedback"
+        // 5. Invoke LangGraph state machine with action: "feedback"
         const result = await graph.invoke({
             action: "feedback",
             question: currentQuestion.question,
@@ -242,7 +366,7 @@ export const submitAnswer = async (req, res) => {
         currentQuestion.feedback = result.feedback;
         interview.currentQuestion++;
 
-        // If interview is finished, compile final scores & AI summary report
+        // 6. If interview is finished, compile final scores & AI summary report
         if (isLastQuestion) {
             interview.status = "completed";
             interview.overallScore = result.report?.overallScore || 0;
@@ -278,6 +402,8 @@ export const submitAnswer = async (req, res) => {
             success: false,
             message: error.message || "Failed to submit answer"
         });
+    } finally {
+        await releaseLock();
     }
 };
 

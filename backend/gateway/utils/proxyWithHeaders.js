@@ -19,6 +19,13 @@ export const proxyWithHeaders = (serviceUrl) => {
         {
             parseReqBody: false,
 
+            proxyReqBodyDecorator: (bodyContent, srcReq) => {
+                if (srcReq.body && Object.keys(srcReq.body).length > 0) {
+                    return JSON.stringify(srcReq.body);
+                }
+                return bodyContent;
+            },
+
             proxyReqOptDecorator: (proxyReqOpts, srcReq) => {
                 // Strip any client-supplied identity or internal trust headers
                 delete proxyReqOpts.headers["x-user-id"];
@@ -28,6 +35,17 @@ export const proxyWithHeaders = (serviceUrl) => {
                 // Inject internal service communication secret
                 if (process.env.INTERNAL_SERVICE_SECRET) {
                     proxyReqOpts.headers["x-internal-secret"] = process.env.INTERNAL_SERVICE_SECRET;
+                }
+
+                // If body was parsed by Express, recalculate content-length
+                if (srcReq.body && Object.keys(srcReq.body).length > 0) {
+                    const jsonPayload = JSON.stringify(srcReq.body);
+                    proxyReqOpts.headers["content-length"] = Buffer.byteLength(jsonPayload);
+                }
+
+                // Propagate correlation / request ID
+                if (srcReq.requestId) {
+                    proxyReqOpts.headers["x-request-id"] = srcReq.requestId;
                 }
 
                 // Inject authenticated user ID verified by Gateway session

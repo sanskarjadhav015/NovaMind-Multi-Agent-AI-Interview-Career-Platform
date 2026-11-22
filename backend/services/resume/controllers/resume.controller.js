@@ -10,6 +10,7 @@ import extractText from "../config/pdf.js";
 import Resume from "../models/resume.model.js";
 import fs from "fs";
 import mongoose from "mongoose";
+import crypto from "crypto";
 import { verifyPdfMagicBytes } from "../middleware/multer.js";
 
 let redisClient = null;
@@ -87,6 +88,45 @@ export const uploadResume = async (req, res) => {
             });
         }
 
+        let deductedCoins = false;
+        const idempotencyKey = req.body?.idempotencyKey || `resume_upload_${userId}_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
+
+        // Server-side atomic & idempotent coin deduction (10 coins)
+        const authUrl = process.env.AUTH_SERVICE_URL || "http://localhost:8001";
+        let deductData = null;
+        try {
+            const deductRes = await fetch(`${authUrl}/internal/deduct-coins`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "x-internal-secret": process.env.INTERNAL_SERVICE_SECRET || ""
+                },
+                body: JSON.stringify({
+                    userId,
+                    coins: 10,
+                    action: "resume_scorer",
+                    idempotencyKey
+                }),
+                signal: AbortSignal.timeout(8000)
+            });
+
+            deductData = await deductRes.json();
+            if (!deductRes.ok || !deductData.success) {
+                return res.status(deductRes.status === 403 ? 403 : 400).json({
+                    success: false,
+                    message: deductData.message || "Insufficient interview coins (10 required)",
+                    interviewCoin: deductData.interviewCoin
+                });
+            }
+            deductedCoins = true;
+        } catch (authErr) {
+            console.error("Coin deduction communication error:", authErr.message);
+            return res.status(502).json({
+                success: false,
+                message: "Unable to verify coin balance with Auth service. Please try again shortly."
+            });
+        }
+
         // Extract raw text from PDF
         const resumeText = await extractText(file.path);
         if (!resumeText || resumeText.trim().length < 20) {
@@ -122,17 +162,39 @@ export const uploadResume = async (req, res) => {
         let resume = await Resume.findOne({ userId });
 
         if (resume) {
+            const nextVersion = (resume.documentVersion || 1) + 1;
             Object.assign(resume, {
                 ...resumeData,
-                extractedText: resumeText
+                extractedText: resumeText,
+                documentVersion: nextVersion,
+                indexingStatus: "pending"
             });
             await resume.save();
         } else {
             resume = await Resume.create({
                 userId,
                 extractedText: resumeText,
+                documentVersion: 1,
+                indexingStatus: "pending",
                 ...resumeData
             });
+        }
+
+        // Asynchronously index resume into Qdrant vector database with tenant isolation
+        try {
+            const { indexResumeDocument } = await import("../../../shared/rag/retriever.js");
+            const indexRes = await indexResumeDocument({
+                userId: resume.userId.toString(),
+                documentId: resume._id.toString(),
+                text: resumeText,
+                documentVersion: resume.documentVersion || 1
+            });
+            resume.indexingStatus = indexRes.success ? "indexed" : "failed";
+            await resume.save();
+        } catch (indexErr) {
+            console.warn("[ResumeController] RAG indexing error:", indexErr.message);
+            resume.indexingStatus = "failed";
+            await resume.save();
         }
 
         // Cache in Redis
@@ -141,11 +203,35 @@ export const uploadResume = async (req, res) => {
         return res.status(200).json({
             success: true,
             message: "Resume analyzed successfully",
-            data: resume
+            data: resume,
+            interviewCoin: deductData?.interviewCoin
         });
 
     } catch (error) {
         console.error("uploadResume Error:", error);
+
+        // Automatic idempotent refund if coins were deducted before failure
+        if (deductedCoins) {
+            try {
+                const authUrl = process.env.AUTH_SERVICE_URL || "http://localhost:8001";
+                await fetch(`${authUrl}/internal/refund-coins`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "x-internal-secret": process.env.INTERNAL_SERVICE_SECRET || ""
+                    },
+                    body: JSON.stringify({
+                        userId,
+                        coins: 10,
+                        reason: "resume_upload_failed",
+                        idempotencyKey: `refund_${idempotencyKey}`
+                    }),
+                    signal: AbortSignal.timeout(8000)
+                });
+            } catch (refundErr) {
+                console.error("Auto-refund error:", refundErr.message);
+            }
+        }
         return res.status(500).json({
             success: false,
             message: error.message || "Failed to process resume"

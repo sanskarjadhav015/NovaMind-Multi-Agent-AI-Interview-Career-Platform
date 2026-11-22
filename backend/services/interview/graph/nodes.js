@@ -14,15 +14,33 @@ import { summaryAgent } from "../agents/summary.agent.js";
  * @returns {Promise<{questions: Array<object>}>}
  */
 export async function interviewNode(state) {
+    let resumeContext = state.resumeContext || "";
+    if (state.useResume && state.userId && !resumeContext) {
+        try {
+            const { retrieveResumeContext } = await import("../../../shared/rag/retriever.js");
+            const result = await retrieveResumeContext({
+                userId: state.userId,
+                query: `interview questions for candidate role ${state.role} technical skills projects experience`
+            });
+            if (result && result.contextText) {
+                resumeContext = result.contextText;
+            }
+        } catch (ragErr) {
+            console.warn("[interviewNode] RAG retrieval error:", ragErr.message);
+        }
+    }
+
     const questions = await interviewAgent({
         role: state.role,
         type: state.type,
         useResume: state.useResume,
-        resume: state.resume
+        resume: state.resume,
+        resumeContext
     });
 
     return {
-        questions
+        questions,
+        resumeContext
     };
 }
 

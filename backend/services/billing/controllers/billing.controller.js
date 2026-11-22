@@ -171,7 +171,9 @@ export const createOrder = async (req, res) => {
         const billingRecord = await Billing.create({
             userId,
             amount: plan.amount,
+            currency: order.currency || "INR",
             interviewCoins: plan.interviewCoins,
+            planId: plan.id,
             razorpayOrderId: order.id,
             status: "created"
         });
@@ -194,8 +196,95 @@ export const createOrder = async (req, res) => {
 };
 
 /**
- * Cryptographically verifies Razorpay payment signature using HMAC SHA-256.
- * Upon successful verification, marks transaction as 'paid' and returns purchased coins.
+ * Timing-safe cryptographic verification of Razorpay HMAC SHA-256 signatures.
+ * 
+ * @param {string} orderId - Razorpay order identifier
+ * @param {string} paymentId - Razorpay payment identifier
+ * @param {string} signature - Client-supplied hex signature
+ * @param {string} secret - Server-side Razorpay Key Secret
+ * @returns {boolean} True if signature is cryptographically valid
+ */
+export const verifyRazorpaySignature = (orderId, paymentId, signature, secret) => {
+    if (!orderId || !paymentId || !signature || !secret) {
+        return false;
+    }
+    try {
+        const expectedSign = crypto
+            .createHmac("sha256", secret)
+            .update(`${orderId}|${paymentId}`)
+            .digest("hex");
+
+        const expectedBuf = Buffer.from(expectedSign, "utf8");
+        const signatureBuf = Buffer.from(signature, "utf8");
+
+        if (expectedBuf.length !== signatureBuf.length) {
+            return false;
+        }
+
+        return crypto.timingSafeEqual(expectedBuf, signatureBuf);
+    } catch {
+        return false;
+    }
+};
+
+/**
+ * Delivers purchased coins to Auth Service with deterministic idempotency.
+ * 
+ * @param {import("../models/billing.model.js").default} payment - Billing record
+ * @param {string} paymentId - Verified Razorpay payment ID
+ * @returns {Promise<{ delivered: boolean, error?: string }>}
+ */
+export const deliverCoinCredit = async (payment, paymentId) => {
+    const authUrl = process.env.AUTH_SERVICE_URL || "http://auth:8001";
+    const idempotencyKey = `credit_rzp_${payment.razorpayOrderId}_${paymentId}`;
+
+    try {
+        const creditRes = await fetch(`${authUrl}/internal/credit-coins`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "x-internal-secret": process.env.INTERNAL_SERVICE_SECRET || ""
+            },
+            body: JSON.stringify({
+                userId: payment.userId,
+                coins: payment.interviewCoins,
+                idempotencyKey
+            }),
+            signal: AbortSignal.timeout(8000)
+        });
+
+        const creditData = await creditRes.json().catch(() => ({}));
+
+        if (creditRes.ok && creditData.success) {
+            payment.status = "paid";
+            payment.creditDelivered = true;
+            payment.idempotencyKey = idempotencyKey;
+            payment.lastCreditError = "";
+            await payment.save();
+            return { delivered: true };
+        } else {
+            payment.status = "credit_pending";
+            payment.creditDelivered = false;
+            payment.idempotencyKey = idempotencyKey;
+            payment.lastCreditError = creditData.message || `Auth Service returned status ${creditRes.status}`;
+            await payment.save();
+            return { delivered: false, error: payment.lastCreditError };
+        }
+    } catch (err) {
+        console.error("Coin credit delivery network error:", err.message);
+        payment.status = "credit_pending";
+        payment.creditDelivered = false;
+        payment.idempotencyKey = idempotencyKey;
+        payment.lastCreditError = err.message;
+        await payment.save();
+        return { delivered: false, error: err.message };
+    }
+};
+
+/**
+ * Cryptographically verifies Razorpay payment signature using timing-safe comparison,
+ * executes atomic state transitions to prevent double-crediting race conditions,
+ * and durably credits purchased coins to Auth Service.
  * 
  * @param {import("express").Request} req - Request containing { razorpay_order_id, razorpay_payment_id, razorpay_signature }
  * @param {import("express").Response} res - Express response
@@ -206,33 +295,32 @@ export const verifyPayment = async (req, res) => {
         const orderId = req.body.razorpay_order_id || req.body.razorpayOrderId || req.body.razorpay_Order_id;
         const paymentId = req.body.razorpay_payment_id || req.body.razorpayPaymentId || req.body.razorpay_Payment_id;
         const signature = req.body.razorpay_signature || req.body.razorpaySignature || req.body.razorpay_Signature;
+        const userId = req.headers["x-user-id"] || req.headers["x-user_id"];
 
         if (!orderId || !paymentId || !signature) {
             return res.status(400).json({
                 success: false,
-                message: "Missing payment verification parameters"
+                message: "Missing payment verification parameters (orderId, paymentId, signature required)"
             });
         }
 
-        const payment = await Billing.findOne({ razorpayOrderId: orderId });
-        if (!payment) {
-            return res.status(404).json({
-                success: false,
-                message: "Payment record not found"
-            });
-        }
+        // 1. Timing-safe cryptographic signature check
+        const isValidSignature = verifyRazorpaySignature(
+            orderId,
+            paymentId,
+            signature,
+            process.env.RAZORPAY_KEY_SECRET
+        );
 
-        // Generate HMAC SHA256 signature using Razorpay Key Secret
-        const genSign = crypto
-            .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
-            .update(`${orderId}|${paymentId}`)
-            .digest("hex");
-
-        if (genSign !== signature) {
-            payment.status = "failed";
-            payment.razorpayPaymentId = paymentId;
-            payment.razorpaySignature = signature;
-            await payment.save();
+        if (!isValidSignature) {
+            await Billing.findOneAndUpdate(
+                { razorpayOrderId: orderId },
+                {
+                    status: "failed",
+                    razorpayPaymentId: paymentId,
+                    razorpaySignature: signature
+                }
+            ).catch(() => {});
 
             return res.status(400).json({
                 success: false,
@@ -240,59 +328,204 @@ export const verifyPayment = async (req, res) => {
             });
         }
 
-        // Idempotency check: avoid double-processing paid transactions
-        if (payment.status === "paid") {
+        // 2. Atomic claim: transition from created/credit_pending/failed to processing
+        const payment = await Billing.findOneAndUpdate(
+            {
+                razorpayOrderId: orderId,
+                status: { $in: ["created", "credit_pending", "failed"] }
+            },
+            {
+                $set: {
+                    status: "processing",
+                    razorpayPaymentId: paymentId,
+                    razorpaySignature: signature
+                },
+                $inc: { creditAttempts: 1 }
+            },
+            { new: true }
+        );
+
+        // 3. Concurrency check: If another concurrent request claimed or completed this order
+        if (!payment) {
+            const existingPayment = await Billing.findOne({ razorpayOrderId: orderId });
+            if (!existingPayment) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Payment record not found"
+                });
+            }
+
+            if (existingPayment.status === "paid") {
+                return res.status(200).json({
+                    success: true,
+                    message: "Payment already verified and credited",
+                    coins: existingPayment.interviewCoins,
+                    amount: existingPayment.amount,
+                    orderId: existingPayment.razorpayOrderId,
+                    paymentId: existingPayment.razorpayPaymentId,
+                    deduplicated: true
+                });
+            }
+
+            if (existingPayment.status === "processing") {
+                return res.status(202).json({
+                    success: false,
+                    message: "Payment is currently being processed. Please refresh in a moment.",
+                    processing: true
+                });
+            }
+        }
+
+        // 4. Validate user ownership if userId header present
+        if (userId && payment.userId.toString() !== userId.toString()) {
+            payment.status = "failed";
+            payment.lastCreditError = "User ID mismatch between session and order";
+            await payment.save();
+            return res.status(403).json({
+                success: false,
+                message: "Unauthorized: Payment order belongs to another candidate"
+            });
+        }
+
+        // 5. Durable coin delivery to Auth Service
+        const creditResult = await deliverCoinCredit(payment, paymentId);
+
+        if (creditResult.delivered) {
             return res.status(200).json({
                 success: true,
-                message: "Payment already verified",
-                coins: payment.interviewCoins
+                message: "Payment Successful and coins credited",
+                coins: payment.interviewCoins,
+                amount: payment.amount,
+                orderId: payment.razorpayOrderId,
+                paymentId: payment.razorpayPaymentId,
+                status: "paid"
+            });
+        } else {
+            return res.status(202).json({
+                success: true,
+                message: "Payment verified. Coin delivery is queued and will be completed momentarily.",
+                coins: payment.interviewCoins,
+                amount: payment.amount,
+                orderId: payment.razorpayOrderId,
+                paymentId: payment.razorpayPaymentId,
+                status: "credit_pending"
             });
         }
-
-        payment.status = "paid";
-        payment.razorpayPaymentId = paymentId;
-        payment.razorpaySignature = signature;
-        await payment.save();
-
-        // Atomically and securely credit coins on Auth Service via internal communication
-        try {
-            const authUrl = process.env.AUTH_SERVICE_URL || "http://auth:8001";
-            await fetch(`${authUrl}/internal/credit-coins`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "x-internal-secret": process.env.INTERNAL_SERVICE_SECRET || ""
-                },
-                body: JSON.stringify({
-                    userId: payment.userId,
-                    coins: payment.interviewCoins
-                })
-            });
-        } catch (creditErr) {
-            console.error("Internal coin credit error:", creditErr.message);
-        }
-
-        return res.status(200).json({
-            success: true,
-            message: "Payment Successful",
-            coins: payment.interviewCoins,
-            amount: payment.amount,
-            orderId: orderId,
-            paymentId: paymentId
-        });
 
     } catch (error) {
         console.error("Payment verification error:", error);
-        const orderId = req.body?.razorpay_order_id || req.body?.razorpayOrderId || req.body?.razorpay_Order_id;
-        if (orderId) {
-            await Billing.findOneAndUpdate(
-                { razorpayOrderId: orderId },
-                { status: "failed" }
-            ).catch(() => {});
-        }
         return res.status(500).json({
             success: false,
             message: error.message || "Payment verification failed"
         });
+    }
+};
+
+/**
+ * Reconciles pending payment credits where payment succeeded but coin delivery encountered an issue.
+ * 
+ * @param {import("express").Request} req - Express request
+ * @param {import("express").Response} res - Express response
+ * @returns {Promise<import("express").Response>}
+ */
+export const reconcilePendingPayments = async (req, res) => {
+    try {
+        const pendingPayments = await Billing.find({
+            status: "credit_pending",
+            creditAttempts: { $lt: 10 }
+        }).limit(20);
+
+        let reconciledCount = 0;
+        for (const payment of pendingPayments) {
+            if (payment.razorpayPaymentId) {
+                payment.creditAttempts += 1;
+                const result = await deliverCoinCredit(payment, payment.razorpayPaymentId);
+                if (result.delivered) reconciledCount++;
+            }
+        }
+
+        return res.status(200).json({
+            success: true,
+            totalPending: pendingPayments.length,
+            reconciled: reconciledCount
+        });
+    } catch (err) {
+        return res.status(500).json({
+            success: false,
+            message: "Reconciliation failed: " + err.message
+        });
+    }
+};
+
+/**
+ * Razorpay Webhook Handler for asynchronous payment notifications.
+ * Verifies webhook signatures and processes payment.captured / order.paid events idempotently.
+ * 
+ * @param {import("express").Request} req - Webhook request
+ * @param {import("express").Response} res - Express response
+ * @returns {Promise<import("express").Response>}
+ */
+export const razorpayWebhook = async (req, res) => {
+    try {
+        const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
+        const signature = req.headers["x-razorpay-signature"];
+
+        if (!webhookSecret) {
+            console.warn("⚠️ RAZORPAY_WEBHOOK_SECRET not configured. Documenting webhook received.");
+            return res.status(200).json({ received: true, note: "Webhook secret not configured on server" });
+        }
+
+        if (!signature) {
+            return res.status(400).json({ success: false, message: "Missing x-razorpay-signature header" });
+        }
+
+        // Verify webhook signature with raw payload
+        const rawBody = typeof req.body === "string" ? req.body : JSON.stringify(req.body);
+        const expectedSign = crypto
+            .createHmac("sha256", webhookSecret)
+            .update(rawBody)
+            .digest("hex");
+
+        const expectedBuf = Buffer.from(expectedSign, "utf8");
+        const sigBuf = Buffer.from(signature, "utf8");
+
+        if (expectedBuf.length !== sigBuf.length || !crypto.timingSafeEqual(expectedBuf, sigBuf)) {
+            return res.status(400).json({ success: false, message: "Invalid webhook signature" });
+        }
+
+        const event = req.body?.event;
+        const payload = req.body?.payload;
+
+        if (event === "payment.captured" || event === "order.paid") {
+            const paymentEntity = payload?.payment?.entity;
+            const orderId = paymentEntity?.order_id;
+            const paymentId = paymentEntity?.id;
+
+            if (orderId && paymentId) {
+                const payment = await Billing.findOneAndUpdate(
+                    {
+                        razorpayOrderId: orderId,
+                        status: { $in: ["created", "credit_pending", "failed"] }
+                    },
+                    {
+                        $set: {
+                            status: "processing",
+                            razorpayPaymentId: paymentId
+                        },
+                        $inc: { creditAttempts: 1 }
+                    },
+                    { new: true }
+                );
+
+                if (payment) {
+                    await deliverCoinCredit(payment, paymentId);
+                }
+            }
+        }
+
+        return res.status(200).json({ success: true, received: true });
+    } catch (err) {
+        console.error("Webhook processing error:", err);
+        return res.status(500).json({ success: false, message: "Webhook handler error" });
     }
 };

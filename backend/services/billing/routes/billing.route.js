@@ -8,6 +8,8 @@ import {
     createOrder,
     getBillingHistory,
     getPlans,
+    reconcilePendingPayments,
+    razorpayWebhook,
     verifyPayment
 } from "../controllers/billing.controller.js";
 
@@ -24,5 +26,11 @@ billingRouter.post("/create", createOrder);
 
 // Verify Razorpay payment HMAC signature
 billingRouter.post("/verify", verifyPayment);
+
+// Reconcile pending coin credits
+billingRouter.post("/reconcile", reconcilePendingPayments);
+
+// Razorpay webhook notification
+billingRouter.post("/webhook", razorpayWebhook);
 
 export default billingRouter;

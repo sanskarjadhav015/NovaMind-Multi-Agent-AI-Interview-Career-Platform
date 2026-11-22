@@ -10,6 +10,12 @@ import { Annotation } from "@langchain/langgraph";
  * LangGraph state schema for interview flow execution.
  */
 const InterviewState = Annotation.Root({
+    // Candidate user ID for tenant-isolated RAG retrieval
+    userId: Annotation(),
+
+    // Target role (e.g., "Full Stack Developer")
+    role: Annotation(),
+
     // Action trigger: "start" | "feedback"
     action: Annotation(),
 
@@ -21,6 +27,9 @@ const InterviewState = Annotation.Root({
 
     // Structured candidate resume data
     resume: Annotation(),
+
+    // RAG retrieved context from Qdrant vector database
+    resumeContext: Annotation(),
 
     // List of generated interview questions
     questions: Annotation(),

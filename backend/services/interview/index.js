@@ -5,14 +5,25 @@
 
 import "dotenv/config";
 import express from "express";
+import mongoose from "mongoose";
 import { connectDB } from "./config/db.js";
 import interviewRouter from "./routes/interview.route.js";
 import { verifyInternalSecret } from "../../shared/middleware/verifyInternalSecret.js";
 import { requestLogger } from "../../shared/middleware/requestLogger.js";
+import { createHealthRouter } from "../../shared/middleware/healthCheck.js";
+import { isRedisHealthy } from "../../shared/redis/redis.js";
 
 const app = express();
 
 app.use(requestLogger("Interview"));
+
+// Health checks for container orchestrator
+app.use("/health", createHealthRouter({
+    serviceName: "Interview",
+    mongoose,
+    redisCheck: isRedisHealthy
+}));
+
 app.use(verifyInternalSecret);
 app.use(express.json());
 

@@ -5,16 +5,27 @@
 
 import express from "express";
 import dotenv from "dotenv";
+import mongoose from "mongoose";
 import { connectDB } from "./config/db.js";
 import billingRouter from "./routes/billing.route.js";
 import { verifyInternalSecret } from "../../shared/middleware/verifyInternalSecret.js";
 import { requestLogger } from "../../shared/middleware/requestLogger.js";
+import { createHealthRouter } from "../../shared/middleware/healthCheck.js";
+import { isRedisHealthy } from "../../shared/redis/redis.js";
 
 dotenv.config();
 
 const app = express();
 
 app.use(requestLogger("Billing"));
+
+// Unauthenticated health check for orchestrator
+app.use("/health", createHealthRouter({
+    serviceName: "Billing",
+    mongoose,
+    redisCheck: isRedisHealthy
+}));
+
 app.use(verifyInternalSecret);
 app.use(express.json());
 
