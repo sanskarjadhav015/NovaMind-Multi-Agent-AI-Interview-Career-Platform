@@ -44,10 +44,10 @@ const openRouterLlm = new ChatOpenAI({
     maxTokens: 4000
 });
 
-// Tier 3 Fallback: Google Gemini API (Verified working model: gemini-3.5-flash)
+// Tier 3 Fallback: Google Gemini API (Verified working model: gemini-3.5-flash-lite)
 const geminiLlm = new ChatGoogleGenerativeAI({
     apiKey: process.env.GEMINI_API_KEY || "AIzaSy_placeholder_test_key",
-    model: "gemini-3.5-flash",
+    model: "gemini-3.5-flash-lite",
     temperature: 0.2,
     maxRetries: 1,
     maxTokens: 4000

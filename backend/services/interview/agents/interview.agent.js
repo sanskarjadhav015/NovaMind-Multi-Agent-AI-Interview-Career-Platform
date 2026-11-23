@@ -52,18 +52,33 @@ function repairAndParseJson(text) {
     }
 }
 
+function normalizeContentString(content) {
+    if (typeof content === "string") return content;
+    if (Array.isArray(content)) {
+        return content.map(part => {
+            if (typeof part === "string") return part;
+            return part?.text || "";
+        }).join("");
+    }
+    if (content && typeof content === "object" && typeof content.text === "string") {
+        return content.text;
+    }
+    return "";
+}
+
 /**
  * Sanitizes, parses, and normalizes LLM question output into a verified Array of 6 questions.
- * @param {string} content - Raw LLM response string
+ * @param {string|Array} content - Raw LLM response string or content parts array
  * @returns {Array<object>} Validated array of 6 question objects
  */
 function parseAndValidateQuestions(content) {
-    if (!content || typeof content !== "string") {
+    const rawText = normalizeContentString(content);
+    if (!rawText) {
         throw new Error("Model returned empty or non-string response.");
     }
 
     // Strip reasoning traces (<think>...</think>)
-    let text = content.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+    let text = rawText.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
 
     // Strip markdown code fences if present
     const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);

@@ -77,8 +77,9 @@ const safeRedisDel = async (key) => {
 export const startInterview = async (req, res) => {
     let deductedCoins = false;
     let idempotencyKey = "";
+    let userId = null;
     try {
-        const userId = req.headers["x-user-id"] || req.headers["x-user_id"];
+        userId = req.headers["x-user-id"] || req.headers["x-user_id"];
         if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
             return res.status(401).json({
                 success: false,
