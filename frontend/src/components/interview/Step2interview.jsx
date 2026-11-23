@@ -78,11 +78,15 @@ function Step2interview({ interviewData, user, setUser }) {
   // Mutable refs to avoid stale closures in recognition callbacks
   const micOnRef = useRef(true);
   const feedbackRef = useRef(null);
+  const isAISpeakingRef = useRef(false);
+  const questionTextRef = useRef('');
 
   // Keep refs in sync with state
   useEffect(() => { micOnRef.current = micOn; }, [micOn]);
   useEffect(() => { feedbackRef.current = feedback; }, [feedback]);
   useEffect(() => { liveInterimRef.current = liveInterim; }, [liveInterim]);
+  useEffect(() => { isAISpeakingRef.current = isAISpeaking; }, [isAISpeaking]);
+  useEffect(() => { questionTextRef.current = questionData?.question || ''; }, [questionData]);
 
   // Check speech recognition support on mount
   useEffect(() => {
@@ -170,14 +174,20 @@ function Step2interview({ interviewData, user, setUser }) {
       } catch (e) {}
       recognitionInstanceRef.current = null;
     }
-    // Commit any remaining unfinalized interim speech
-    if (liveInterimRef.current.trim()) {
-      setAnswer((prev) => {
-        const separator = prev && !prev.endsWith(' ') ? ' ' : '';
-        return prev + separator + liveInterimRef.current.trim();
-      });
-      setLiveInterim('');
+    // Commit any remaining unfinalized interim speech ONLY if AI is not speaking
+    if (liveInterimRef.current.trim() && !isAISpeakingRef.current && !synthRef.current?.speaking) {
+      const interim = liveInterimRef.current.trim();
+      const normQ = (questionTextRef.current || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const normText = interim.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const isEcho = normQ && normText && (normQ.includes(normText) || normText.includes(normQ));
+      if (!isEcho) {
+        setAnswer((prev) => {
+          const separator = prev && !prev.endsWith(' ') ? ' ' : '';
+          return prev + separator + interim;
+        });
+      }
     }
+    setLiveInterim('');
     setIsListening(false);
   };
 
@@ -185,7 +195,8 @@ function Step2interview({ interviewData, user, setUser }) {
   const startRecognition = () => {
     const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRec) return;
-    if (!micOnRef.current || feedbackRef.current) return;
+    // Do NOT listen while mic is toggled off, feedback is displayed, or AI avatar is speaking
+    if (!micOnRef.current || feedbackRef.current || isAISpeakingRef.current || synthRef.current?.speaking) return;
 
     if (restartTimeoutRef.current) {
       clearTimeout(restartTimeoutRef.current);
@@ -215,6 +226,12 @@ function Step2interview({ interviewData, user, setUser }) {
       };
 
       recognition.onresult = (event) => {
+        // Discard any sound heard while AI is speaking
+        if (isAISpeakingRef.current || synthRef.current?.speaking) {
+          setLiveInterim('');
+          return;
+        }
+
         let interimText = '';
         let finalText = '';
 
@@ -228,10 +245,23 @@ function Step2interview({ interviewData, user, setUser }) {
           }
         }
 
+        // Acoustic Echo Rejection: If heard audio matches the current question, filter it out
+        const normQ = (questionTextRef.current || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const normFinal = finalText.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+        const normInterim = interimText.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+
+        if (normQ && normInterim && (normQ.includes(normInterim) || (normInterim.length > 15 && normInterim.includes(normQ)))) {
+          interimText = '';
+        }
+
         setLiveInterim(interimText);
 
         if (finalText.trim()) {
           setLiveInterim('');
+          if (normQ && normFinal && (normQ.includes(normFinal) || (normFinal.length > 15 && normFinal.includes(normQ)))) {
+            // Echo detected — do not append to user answer
+            return;
+          }
           setAnswer((prev) => {
             const separator = prev && !prev.endsWith(' ') ? ' ' : '';
             return prev + separator + finalText.trim();
@@ -255,19 +285,25 @@ function Step2interview({ interviewData, user, setUser }) {
 
       recognition.onend = () => {
         setIsListening(false);
-        // Commit any unfinalized words
-        if (liveInterimRef.current.trim()) {
-          setAnswer((prev) => {
-            const separator = prev && !prev.endsWith(' ') ? ' ' : '';
-            return prev + separator + liveInterimRef.current.trim();
-          });
-          setLiveInterim('');
+        // Commit any unfinalized words ONLY if AI was not speaking
+        if (liveInterimRef.current.trim() && !isAISpeakingRef.current && !synthRef.current?.speaking) {
+          const interim = liveInterimRef.current.trim();
+          const normQ = (questionTextRef.current || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          const normText = interim.toLowerCase().replace(/[^a-z0-9]/g, '');
+          const isEcho = normQ && normText && (normQ.includes(normText) || (normText.length > 15 && normText.includes(normQ)));
+          if (!isEcho) {
+            setAnswer((prev) => {
+              const separator = prev && !prev.endsWith(' ') ? ' ' : '';
+              return prev + separator + interim;
+            });
+          }
         }
+        setLiveInterim('');
 
-        // Safe delayed restart so Chrome doesn't throw InvalidStateError
-        if (micOnRef.current && !feedbackRef.current) {
+        // Safe delayed restart so Chrome doesn't throw InvalidStateError (only if AI is not speaking)
+        if (micOnRef.current && !feedbackRef.current && !isAISpeakingRef.current && !synthRef.current?.speaking) {
           restartTimeoutRef.current = setTimeout(() => {
-            if (micOnRef.current && !feedbackRef.current) {
+            if (micOnRef.current && !feedbackRef.current && !isAISpeakingRef.current && !synthRef.current?.speaking) {
               startRecognition();
             }
           }, 300);
@@ -278,9 +314,9 @@ function Step2interview({ interviewData, user, setUser }) {
       recognitionInstanceRef.current = recognition;
     } catch (err) {
       console.warn('Speech recognition start failed, retrying in 400ms:', err);
-      if (micOnRef.current && !feedbackRef.current) {
+      if (micOnRef.current && !feedbackRef.current && !isAISpeakingRef.current && !synthRef.current?.speaking) {
         restartTimeoutRef.current = setTimeout(() => {
-          if (micOnRef.current && !feedbackRef.current) {
+          if (micOnRef.current && !feedbackRef.current && !isAISpeakingRef.current && !synthRef.current?.speaking) {
             startRecognition();
           }
         }, 400);
@@ -315,21 +351,29 @@ function Step2interview({ interviewData, user, setUser }) {
     };
   }, []);
 
-  // Manage start/stop based on micOn or feedback changes
+  // Manage start/stop based on micOn, feedback, or AI speaking state
   useEffect(() => {
-    if (micOn && !feedback) {
+    if (micOn && !feedback && !isAISpeaking) {
       startRecognition();
     } else {
       stopRecognition();
     }
-  }, [micOn, feedback]);
+  }, [micOn, feedback, isAISpeaking]);
 
   // 3. AI Text-to-Speech (TTS) Narrator
   const speakText = (textToSpeak) => {
     if (!synthRef.current || aiMuted || !textToSpeak) {
+      setIsAISpeaking(false);
+      isAISpeakingRef.current = false;
       setTimerRunning(true);
       return;
     }
+
+    // Immediately stop speech recognition to prevent speaker-to-mic acoustic feedback
+    setIsAISpeaking(true);
+    isAISpeakingRef.current = true;
+    stopRecognition();
+    setLiveInterim('');
 
     synthRef.current.cancel();
     if (speechSafetyTimerRef.current) clearTimeout(speechSafetyTimerRef.current);
@@ -396,6 +440,9 @@ function Step2interview({ interviewData, user, setUser }) {
 
       utterance.onstart = () => {
         setIsAISpeaking(true);
+        isAISpeakingRef.current = true;
+        stopRecognition();
+        setLiveInterim('');
         setSubtitle(textToSpeak);
         setTimerRunning(false);
         if (aiVideoRef.current) {
@@ -407,27 +454,45 @@ function Step2interview({ interviewData, user, setUser }) {
       utterance.onend = () => {
         if (speechSafetyTimerRef.current) clearTimeout(speechSafetyTimerRef.current);
         setIsAISpeaking(false);
+        isAISpeakingRef.current = false;
         setTimerRunning(true);
         activeUtteranceRef.current = null;
         if (aiVideoRef.current) {
           aiVideoRef.current.pause();
         }
+        // Small delay (400ms) to allow any speaker acoustic tail to completely clear before mic listens
+        setTimeout(() => {
+          if (micOnRef.current && !feedbackRef.current && !isAISpeakingRef.current && !synthRef.current?.speaking) {
+            startRecognition();
+          }
+        }, 400);
       };
 
       utterance.onerror = () => {
         if (speechSafetyTimerRef.current) clearTimeout(speechSafetyTimerRef.current);
         setIsAISpeaking(false);
+        isAISpeakingRef.current = false;
         setTimerRunning(true);
         activeUtteranceRef.current = null;
+        if (aiVideoRef.current) aiVideoRef.current.pause();
+        setTimeout(() => {
+          if (micOnRef.current && !feedbackRef.current) {
+            startRecognition();
+          }
+        }, 300);
       };
 
       // Safety timeout: calculate based on text length to prevent isAISpeaking from ever hanging
       const maxDuration = Math.max(6000, Math.min(25000, textToSpeak.split(' ').length * 600));
       speechSafetyTimerRef.current = setTimeout(() => {
         setIsAISpeaking(false);
+        isAISpeakingRef.current = false;
         setTimerRunning(true);
         activeUtteranceRef.current = null;
         if (aiVideoRef.current) aiVideoRef.current.pause();
+        if (micOnRef.current && !feedbackRef.current) {
+          startRecognition();
+        }
       }, maxDuration);
 
       synthRef.current.speak(utterance);
@@ -446,13 +511,12 @@ function Step2interview({ interviewData, user, setUser }) {
     }
   };
 
-  // Speak new question whenever question changes
+  // Speak new question whenever question changes (only when not reviewing feedback)
   useEffect(() => {
-    if (questionData?.question) {
+    if (questionData?.question && !feedback) {
       const timerVal = questionData.timer || 90;
       setTimeLeft(timerVal);
       setAnswer('');
-      setFeedback(null);
       speakText(questionData.question);
     }
     return () => {
@@ -547,6 +611,8 @@ function Step2interview({ interviewData, user, setUser }) {
   const handleNextQuestion = () => {
     setFeedback(null);
     setAnswer('');
+    const timerVal = questionData?.timer || 90;
+    setTimeLeft(timerVal);
     speakText(questionData?.question);
   };
 
@@ -738,8 +804,21 @@ function Step2interview({ interviewData, user, setUser }) {
 
               <button
                 onClick={() => {
-                  setAiMuted(!aiMuted);
-                  if (!aiMuted && synthRef.current) synthRef.current.cancel();
+                  const nextMuted = !aiMuted;
+                  setAiMuted(nextMuted);
+                  if (nextMuted) {
+                    if (synthRef.current) synthRef.current.cancel();
+                    if (speechSafetyTimerRef.current) clearTimeout(speechSafetyTimerRef.current);
+                    setIsAISpeaking(false);
+                    isAISpeakingRef.current = false;
+                    setTimerRunning(true);
+                    if (aiVideoRef.current) aiVideoRef.current.pause();
+                    setTimeout(() => {
+                      if (micOnRef.current && !feedbackRef.current) {
+                        startRecognition();
+                      }
+                    }, 200);
+                  }
                 }}
                 className="p-2 rounded-xl bg-black/60 hover:bg-black/90 text-white backdrop-blur-md border border-white/10 transition-all cursor-pointer"
                 title={aiMuted ? "Unmute AI" : "Mute AI"}
