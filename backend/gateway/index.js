@@ -84,22 +84,24 @@ const globalLimiter = rateLimit({
 });
 app.use(globalLimiter);
 
-// Sensitive Auth Limiter: 15 login attempts per 15 minutes per IP
+// Sensitive Auth Limiter: 15 login attempts per 15 minutes per IP (skips non-login calls like logout)
 const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 15,
     standardHeaders: true,
     legacyHeaders: false,
-    message: { success: false, message: "Too many authentication attempts, please try again after 15 minutes." }
+    message: { success: false, message: "Too many authentication attempts, please try again after 15 minutes." },
+    skip: (req) => req.path !== "/login"
 });
 
-// AI & Compute-intensive Operations Limiter: 30 requests per 15 minutes per IP
+// AI & Compute-intensive Operations Limiter: 30 requests per 15 minutes per IP (skips read-only queries and answers)
 const aiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 30,
     standardHeaders: true,
     legacyHeaders: false,
-    message: { success: false, message: "AI generation rate limit exceeded. Please try again shortly." }
+    message: { success: false, message: "AI generation rate limit exceeded. Please try again shortly." },
+    skip: (req) => req.method === "GET" || req.path.endsWith("/answer")
 });
 
 const PORT = process.env.PORT || 8000;

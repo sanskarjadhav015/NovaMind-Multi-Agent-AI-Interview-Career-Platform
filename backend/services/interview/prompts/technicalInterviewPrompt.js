@@ -313,9 +313,6 @@ No markdown.
 No explanation.
 
 No extra text.
-
-;
-
 `
 
 export default technicalInterviewPrompt;

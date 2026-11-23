@@ -11,8 +11,7 @@ import {
     getUserBalanceInternal,
     refundCoinsInternal,
     GoogleAuth,
-    logOut,
-    useCoins
+    logOut
 } from "../controllers/auth.controller.js";
 import { verifyInternalSecret } from "../../../shared/middleware/verifyInternalSecret.js";
 
@@ -23,9 +22,6 @@ authRouter.post("/login", GoogleAuth);
 
 // Invalidate session cookie and clear Redis session key
 authRouter.get("/logout", logOut);
-
-// Client-facing coin usage endpoint
-authRouter.post("/use-coins", useCoins);
 
 // Internal-only endpoint to deduct coins atomically & idempotently
 authRouter.post("/internal/deduct-coins", verifyInternalSecret, deductCoinsInternal);

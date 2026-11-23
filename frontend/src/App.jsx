@@ -17,7 +17,7 @@ import { setResume } from './redux/resumeSlice';
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Scorer = lazy(() => import('./pages/Scorer'));
 const ResumeBuilder = lazy(() => import('./pages/ResumeBuilder'));
-const InterviewStart = lazy(() => import('./pages/InterviewStart'));
+const InterviewStart = lazy(() => import('./components/interview/Step1setup'));
 const InterviewPage = lazy(() => import('./pages/InterviewPage'));
 const InterviewReport = lazy(() => import('./pages/InterviewReport'));
 const Roadmap = lazy(() => import('./pages/Roadmap'));
