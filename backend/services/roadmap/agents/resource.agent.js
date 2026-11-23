@@ -51,7 +51,13 @@ Return format:
 
         let docs = [];
         try {
-            let cleanJson = docsResponse.content
+            const rawDocs = typeof docsResponse === "string" 
+                ? docsResponse 
+                : (Array.isArray(docsResponse?.content) 
+                    ? docsResponse.content.map(p => p?.text || "").join("") 
+                    : docsResponse?.content || "");
+
+            let cleanJson = rawDocs
                 .replace(/<think>[\s\S]*?<\/think>/g, "")
                 .replace(/```json|```/g, "")
                 .trim();

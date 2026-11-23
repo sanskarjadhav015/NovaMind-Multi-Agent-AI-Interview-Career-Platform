@@ -59,7 +59,13 @@ ${resumeContext ? `\nVerified Candidate Resume Evidence (RAG):\n${resumeContext}
 `)
         ]);
 
-        let cleanJson = response.content
+        const rawContent = typeof response === "string" 
+            ? response 
+            : (Array.isArray(response?.content) 
+                ? response.content.map(p => p?.text || "").join("") 
+                : response?.content || "");
+
+        let cleanJson = rawContent
             .replace(/<think>[\s\S]*?<\/think>/g, "")
             .replace(/```json|```/g, "")
             .trim();

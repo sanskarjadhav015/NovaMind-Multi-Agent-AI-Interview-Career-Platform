@@ -7,6 +7,20 @@
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import llm from "../config/llm.js";
 
+function normalizeContentString(content) {
+    if (typeof content === "string") return content;
+    if (Array.isArray(content)) {
+        return content.map(part => {
+            if (typeof part === "string") return part;
+            return part?.text || "";
+        }).join("");
+    }
+    if (content && typeof content === "object" && typeof content.text === "string") {
+        return content.text;
+    }
+    return "";
+}
+
 /**
  * Invokes LLM with ATS Resume scoring prompt.
  * @param {string} resumeText - Raw text extracted from candidate PDF
@@ -64,5 +78,6 @@ export const resumeAgent = async (resumeText) => {
     ]);
 
     if (typeof response === "string") return response;
-    return response?.content || JSON.stringify(response);
+    const content = response?.content ?? response;
+    return normalizeContentString(content) || JSON.stringify(response);
 };

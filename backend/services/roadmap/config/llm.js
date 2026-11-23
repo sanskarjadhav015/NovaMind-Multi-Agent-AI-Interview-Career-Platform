@@ -8,7 +8,8 @@ const groqLlm = new ChatGroq({
     apiKey: process.env.GROQ_API_KEY,
     model: "openai/gpt-oss-120b",
     temperature: 0.2,
-    maxRetries: 1,
+    maxRetries: 0,
+    timeout: 8000,
     maxTokens: 4000,
 });
 
@@ -24,14 +25,15 @@ const openRouterLlm = new ChatOpenAI({
         },
     },
     temperature: 0.2,
-    maxRetries: 1,
+    maxRetries: 0,
+    timeout: 8000,
     maxTokens: 4000,
 });
 
-// 3. Fallback 2: Google Gemini (Verified Working Model: gemini-3.8-flash)
+// 3. Fallback 2: Google Gemini (Verified Working Model: gemini-3.5-flash-lite)
 const geminiLlm = new ChatGoogleGenerativeAI({
     apiKey: process.env.GEMINI_API_KEY,
-    model: "gemini-3.8-flash",
+    model: "gemini-3.5-flash-lite",
     temperature: 0.2,
     maxRetries: 1,
     maxTokens: 4000,

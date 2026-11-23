@@ -63,6 +63,9 @@ const safeRedisSet = async (key, value, ttl = 600) => {
  */
 export const uploadResume = async (req, res) => {
     const file = req.file;
+    let deductedCoins = false;
+    let idempotencyKey = "";
+    let userId = null;
 
     try {
         if (!file) {
@@ -80,7 +83,7 @@ export const uploadResume = async (req, res) => {
             });
         }
 
-        const userId = req.headers["x-user-id"] || req.headers["x-user_id"];
+        userId = req.headers["x-user-id"] || req.headers["x-user_id"];
         if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
             return res.status(401).json({
                 success: false,
@@ -88,8 +91,7 @@ export const uploadResume = async (req, res) => {
             });
         }
 
-        let deductedCoins = false;
-        const idempotencyKey = req.body?.idempotencyKey || `resume_upload_${userId}_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
+        idempotencyKey = req.body?.idempotencyKey || `resume_upload_${userId}_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
 
         // Server-side atomic & idempotent coin deduction (10 coins)
         const authUrl = process.env.AUTH_SERVICE_URL || "http://localhost:8001";
@@ -138,9 +140,10 @@ export const uploadResume = async (req, res) => {
 
         // Run ATS Analysis LLM agent
         const aiResponse = await resumeAgent(resumeText);
+        const rawContent = typeof aiResponse === "string" ? aiResponse : JSON.stringify(aiResponse);
 
         // Clean reasoning traces, markdown fences, and control characters
-        let cleanJson = aiResponse
+        let cleanJson = rawContent
             .replace(/<think>[\s\S]*?<\/think>/g, "")
             .replace(/```json|```/g, "")
             .trim();
@@ -156,7 +159,16 @@ export const uploadResume = async (req, res) => {
             match === "\n" || match === "\r" || match === "\t" ? " " : ""
         );
 
-        const resumeData = JSON.parse(cleanJson);
+        let resumeData;
+        try {
+            resumeData = JSON.parse(cleanJson);
+        } catch {
+            // Apply common repairs: trailing commas, unquoted numbers
+            const repaired = cleanJson
+                .replace(/:\s*(\d+)"/g, ": $1")
+                .replace(/,\s*([\]\}])/g, "$1");
+            resumeData = JSON.parse(repaired);
+        }
 
         // Upsert resume document in MongoDB
         let resume = await Resume.findOne({ userId });
