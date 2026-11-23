@@ -7,7 +7,8 @@
     "test": "node -r dotenv/config --test tests/*.test.js dotenv_config_path=services/resume/.env",
     "test:phase2": "node --test tests/phase2_all.test.js",
     "test:phase3": "node --test tests/phase3_rag.test.js",
-    "test:phase4": "node -r dotenv/config --test tests/phase4_production_readiness.test.js dotenv_config_path=services/resume/.env"
+    "test:phase4": "node -r dotenv/config --test tests/phase4_production_readiness.test.js dotenv_config_path=services/resume/.env",
+    "test:novamind": "node --test tests/novamind_provider.test.js"
   },
   "author": "",
   "license": "ISC",

@@ -7,9 +7,9 @@
 import api from '../utils/axios';
 
 /**
- * Initiates a new mock interview session with the chosen role, track, and optional resume.
+ * Initiates a new mock interview session with the chosen role, track, AI provider, and optional resume.
  * 
- * @param {{ type: string, role: string, useResume?: boolean, resume?: object }} data
+ * @param {{ type: string, role: string, useResume?: boolean, resume?: object, aiProvider?: 'standard' | 'novamind' }} data
  * @returns {Promise<object>} Started interview data including first question
  */
 export const startInterview = async (data) => {

@@ -22,6 +22,9 @@ const InterviewState = Annotation.Root({
     // Interview domain: "technical" | "hr"
     type: Annotation(),
 
+    // Selected AI provider: "standard" | "novamind"
+    aiProvider: Annotation(),
+
     // Flag indicating whether candidate resume was incorporated
     useResume: Annotation(),
 

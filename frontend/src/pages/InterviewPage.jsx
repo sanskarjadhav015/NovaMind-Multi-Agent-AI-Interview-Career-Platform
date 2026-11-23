@@ -77,6 +77,7 @@ function InterviewPage({ user, setUser }) {
         question: interview.questions?.[interview.currentQuestion ?? 0] ?? {},
         role: interview.role,
         type: interview.type,
+        aiProvider: interview.aiProvider || 'standard',
       }}
       user={user}
       setUser={setUser}

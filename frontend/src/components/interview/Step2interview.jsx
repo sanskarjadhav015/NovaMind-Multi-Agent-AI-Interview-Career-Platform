@@ -605,6 +605,16 @@ function Step2interview({ interviewData, user, setUser }) {
             <span className="text-xs text-neutral-500 hidden md:inline">
               ({interviewData.type === 'hr' ? 'HR & Behavioral' : 'Technical Track'})
             </span>
+            {interviewData.aiProvider === 'novamind' ? (
+              <span className="px-2 py-0.5 rounded-lg bg-emerald-500/15 text-emerald-300 text-[11px] font-semibold border border-emerald-500/30 hidden lg:inline-flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                NovaMind 3B Model
+              </span>
+            ) : (
+              <span className="px-2 py-0.5 rounded-lg bg-neutral-800 text-neutral-400 text-[11px] font-medium border border-neutral-700/80 hidden lg:inline-flex items-center gap-1">
+                Standard AI Engine
+              </span>
+            )}
           </div>
         </div>
 

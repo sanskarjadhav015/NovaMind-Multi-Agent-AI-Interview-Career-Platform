@@ -112,6 +112,11 @@ const interviewSchema = new mongoose.Schema(
             type: Boolean,
             default: false
         },
+        aiProvider: {
+            type: String,
+            enum: ["standard", "novamind"],
+            default: "standard"
+        },
         currentQuestion: {
             type: Number,
             default: 0

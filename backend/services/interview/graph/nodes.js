@@ -35,7 +35,8 @@ export async function interviewNode(state) {
         type: state.type,
         useResume: state.useResume,
         resume: state.resume,
-        resumeContext
+        resumeContext,
+        aiProvider: state.aiProvider
     });
 
     return {
@@ -53,7 +54,8 @@ export async function feedbackNode(state) {
     const feedback = await feedbackAgent({
         question: state.question,
         answer: state.answer,
-        difficulty: state.difficulty
+        difficulty: state.difficulty,
+        aiProvider: state.aiProvider
     });
 
     return {
@@ -70,7 +72,8 @@ export async function summaryNode(state) {
     const report = await summaryAgent({
         role: state.role,
         type: state.type,
-        questions: state.questions
+        questions: state.questions,
+        aiProvider: state.aiProvider
     });
 
     return {

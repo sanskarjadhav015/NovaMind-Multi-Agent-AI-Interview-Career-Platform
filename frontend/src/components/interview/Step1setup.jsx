@@ -42,6 +42,7 @@ function Step1setup({ user, setUser }) {
   const [role, setRole] = useState(resume?.suggestedRole || '');
   const [type, setType] = useState('technical');
   const [useResume, setUseResume] = useState(Boolean(resume));
+  const [aiProvider, setAiProvider] = useState('novamind');
   const [uploading, setUploading] = useState(false);
   const [starting, setStarting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -96,6 +97,7 @@ function Step1setup({ user, setUser }) {
         type,
         useResume: Boolean(useResume && resume),
         resume: (useResume && resume) ? resume : {},
+        aiProvider,
       });
 
       if (interviewRes?.success && interviewRes?.interviewId) {
@@ -430,6 +432,73 @@ function Step1setup({ user, setUser }) {
                   )}
                 </motion.div>
               )}
+            </div>
+
+            {/* 4. AI Provider Selection */}
+            <div className="space-y-3 pt-2 border-t border-neutral-100">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold uppercase tracking-wider text-neutral-700 flex items-center gap-1.5">
+                  <LuSparkles className="text-purple-600" />
+                  <span>AI Intelligence Provider</span>
+                </label>
+                <span className="text-[10px] font-semibold text-purple-700 bg-purple-50 border border-purple-200 px-2 py-0.5 rounded-full">
+                  User Choice
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Option A: NovaMind Custom Model */}
+                <div
+                  onClick={() => setAiProvider('novamind')}
+                  className={`p-4 rounded-2xl border-2 transition-all cursor-pointer relative ${
+                    aiProvider === 'novamind'
+                      ? 'border-purple-600 bg-purple-50/40 shadow-sm ring-1 ring-purple-600/20'
+                      : 'border-neutral-200 bg-white hover:border-neutral-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-purple-100 text-purple-700 border border-purple-200">
+                      Custom SFT LoRA
+                    </span>
+                    {aiProvider === 'novamind' && (
+                      <span className="w-5 h-5 rounded-full bg-purple-600 text-white flex items-center justify-center text-xs shadow-xs">
+                        <FiCheck />
+                      </span>
+                    )}
+                  </div>
+                  <h3 className="text-sm font-bold text-neutral-900 mt-2 flex items-center gap-1.5">
+                    <span>NovaMind 3B Custom</span>
+                  </h3>
+                  <p className="text-[11px] text-neutral-500 mt-1 leading-snug">
+                    Fine-tuned Qwen-2.5 3B model deployed on Hugging Face Spaces. Specialized for tailored interviews.
+                  </p>
+                </div>
+
+                {/* Option B: Standard Multi-Tier AI */}
+                <div
+                  onClick={() => setAiProvider('standard')}
+                  className={`p-4 rounded-2xl border-2 transition-all cursor-pointer relative ${
+                    aiProvider === 'standard'
+                      ? 'border-purple-600 bg-purple-50/40 shadow-sm ring-1 ring-purple-600/20'
+                      : 'border-neutral-200 bg-white hover:border-neutral-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-neutral-100 text-neutral-700 border border-neutral-200">
+                      Multi-Tier Cloud
+                    </span>
+                    {aiProvider === 'standard' && (
+                      <span className="w-5 h-5 rounded-full bg-purple-600 text-white flex items-center justify-center text-xs shadow-xs">
+                        <FiCheck />
+                      </span>
+                    )}
+                  </div>
+                  <h3 className="text-sm font-bold text-neutral-900 mt-2">Standard AI Engine</h3>
+                  <p className="text-[11px] text-neutral-500 mt-1 leading-snug">
+                    Resilient multi-model pipeline: Groq (Primary) with automatic fallback to OpenRouter & Gemini.
+                  </p>
+                </div>
+              </div>
             </div>
 
             {/* Launch CTA */}
