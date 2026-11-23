@@ -75,6 +75,8 @@ const safeRedisDel = async (key) => {
  * @returns {Promise<import("express").Response>}
  */
 export const startInterview = async (req, res) => {
+    let deductedCoins = false;
+    let idempotencyKey = "";
     try {
         const userId = req.headers["x-user-id"] || req.headers["x-user_id"];
         if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
@@ -88,8 +90,11 @@ export const startInterview = async (req, res) => {
             type,
             role,
             useResume = false,
-            resume = {}
+            resume = {},
+            aiProvider = "standard"
         } = req.body;
+
+        const normalizedProvider = String(aiProvider).toLowerCase() === "novamind" ? "novamind" : "standard";
 
         const validTypes = ["technical", "hr"];
         if (!type || typeof type !== "string" || !validTypes.includes(type.toLowerCase())) {
@@ -109,8 +114,7 @@ export const startInterview = async (req, res) => {
         const normalizedRole = role.trim();
         const normalizedType = type.trim();
 
-        let deductedCoins = false;
-        const idempotencyKey = req.body.idempotencyKey || `interview_start_${userId}_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
+        idempotencyKey = req.body.idempotencyKey || `interview_start_${userId}_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
 
         // Server-side atomic & idempotent coin deduction (50 coins)
         const authUrl = process.env.AUTH_SERVICE_URL || "http://localhost:8001";
@@ -155,11 +159,16 @@ export const startInterview = async (req, res) => {
             role: normalizedRole,
             type: normalizedType,
             useResume: Boolean(useResume),
-            resume
+            resume,
+            aiProvider: normalizedProvider
         });
 
-        const questions = result.questions;
-        if (!questions || questions.length === 0) {
+        const rawQuestions = result.questions;
+        const questions = Array.isArray(rawQuestions)
+            ? rawQuestions
+            : (rawQuestions?.questions || Object.values(rawQuestions || {}).find(Array.isArray) || []);
+
+        if (!Array.isArray(questions) || questions.length === 0) {
             return res.status(500).json({
                 success: false,
                 message: "Failed to generate interview questions"
@@ -172,6 +181,7 @@ export const startInterview = async (req, res) => {
             type: normalizedType,
             role: normalizedRole,
             useResume: Boolean(useResume),
+            aiProvider: normalizedProvider,
             questions,
             currentQuestion: 0,
             status: "in-progress"
@@ -186,7 +196,8 @@ export const startInterview = async (req, res) => {
             currentQuestion: 0,
             totalQuestions: interview.questions.length,
             question: interview.questions[0],
-            interviewCoin: deductData?.interviewCoin
+            interviewCoin: deductData?.interviewCoin,
+            aiProvider: interview.aiProvider
         });
 
     } catch (error) {
@@ -350,6 +361,7 @@ export const submitAnswer = async (req, res) => {
         // 4. Attach candidate response
         currentQuestion.userAnswer = answer;
         const isLastQuestion = interview.currentQuestion + 1 >= interview.questions.length;
+        const aiProvider = interview.aiProvider || "standard";
 
         // 5. Invoke LangGraph state machine with action: "feedback"
         const result = await graph.invoke({
@@ -360,7 +372,8 @@ export const submitAnswer = async (req, res) => {
             completed: isLastQuestion,
             role: interview.role,
             type: interview.type,
-            questions: interview.questions
+            questions: interview.questions,
+            aiProvider
         });
 
         currentQuestion.feedback = result.feedback;
